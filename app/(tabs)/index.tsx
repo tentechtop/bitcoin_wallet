@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     marginLeft: 6,
   },
