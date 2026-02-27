@@ -1,11 +1,18 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+
+// 必须在其他任何导入之前设置
+import 'react-native-get-random-values';
 import { Buffer } from 'buffer';
 
+// 全局 Buffer polyfill
 global.Buffer = Buffer;
+if (typeof global.Buffer.isBuffer === 'undefined') {
+  global.Buffer.isBuffer = (arg: any) => arg instanceof Buffer;
+}
 
+import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { Stack } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export const unstable_settings = {
