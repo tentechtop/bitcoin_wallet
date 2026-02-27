@@ -1,0 +1,33 @@
+# 进入项目目录
+cd f:/workSpace2026/blockchain/bitcoin-wallet
+
+# 预构建 Android 项目
+npx expo prebuild --platform android
+
+cd android
+
+.\gradlew.bat clean
+
+.\gradlew.bat assembleRelease
+
+.\gradlew.bat assembleRelease --parallel
+
+
+gradlew.bat assembleDebug
+
+# 清理构建缓存
+gradlew.bat clean
+
+# 重新构建
+gradlew.bat clean assembleRelease
+
+# 并行构建（更快）
+gradlew.bat assembleRelease --parallel
+
+# 查看构建详情
+gradlew.bat assembleRelease --info
+
+
+npm install
+
+npx expo start  要退出到第一目录
