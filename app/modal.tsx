@@ -3,6 +3,7 @@ import { StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { statusBarHeight } from '@/constants/theme';
 
 export default function ModalScreen() {
   return (
@@ -21,6 +22,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
+    paddingTop: 20 + statusBarHeight,
   },
   link: {
     marginTop: 15,

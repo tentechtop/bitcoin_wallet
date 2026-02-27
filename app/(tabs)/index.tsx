@@ -5,6 +5,7 @@ import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Link } from 'expo-router';
+import { statusBarHeight } from '@/constants/theme';
 
 export default function HomeScreen() {
     return (
@@ -116,6 +117,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     zIndex: 100,
+    paddingTop: statusBarHeight,
   },
   headerContent: {
     flexDirection: 'row',
