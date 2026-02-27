@@ -1,98 +1,289 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
-import { HelloWave } from '@/components/hello-wave';
 import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Link } from 'expo-router';
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    return (
+    <View style={styles.container}>
+      {/* 头部导航栏 */}
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <View style={styles.logo}>
+            <Ionicons name="wallet" size={20} color="#000000" />
+            <ThemedText style={styles.logoText}>Bitcoin WALLET</ThemedText>
+          </View>
+        </View>
+      </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
+      <ParallaxScrollView>
+      {/* 资产概览 */}
+      <ThemedView style={styles.assetsOverview}>
+        <ThemedText style={styles.sectionLabel}>总资产</ThemedText>
+        <ThemedText type="title" style={styles.totalBalance}>0.0000 BTC</ThemedText>
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
+
+      {/* 快速操作 */}
+      <ThemedView style={styles.quickActions}>
+        <TouchableOpacity style={styles.actionBtn}>
+          <ThemedView style={styles.actionIconContainer}>
+            <Ionicons name="arrow-up" size={24} color="#000000" />
+          </ThemedView>
+          <ThemedText style={styles.actionText}>转账</ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionBtn}>
+          <ThemedView style={styles.actionIconContainer}>
+            <Ionicons name="arrow-down" size={24} color="#000000" />
+          </ThemedView>
+          <ThemedText style={styles.actionText}>收款</ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionBtn}>
+          <ThemedView style={styles.actionIconContainer}>
+            <Ionicons name="swap-horizontal" size={24} color="#000000" />
+          </ThemedView>
+          <ThemedText style={styles.actionText}>兑换</ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionBtn}>
+          <ThemedView style={styles.actionIconContainer}>
+            <Ionicons name="grid" size={24} color="#000000" />
+          </ThemedView>
+          <ThemedText style={styles.actionText}>更多</ThemedText>
+        </TouchableOpacity>
+      </ThemedView>
+
+
+      {/* 最近交易 */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedView style={styles.sectionHeader}>
+          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>交易记录</ThemedText>
+          <Link href="/transactions" asChild>
+            <ThemedText style={styles.seeAll}>查看全部</ThemedText>
+          </Link>
+        </ThemedView>
+
+        <ThemedView style={styles.emptyState}>
+          <Ionicons name="document-text-outline" size={48} color="#888888" />
+          <ThemedText style={styles.emptyText}>暂无交易记录</ThemedText>
+          <ThemedText style={styles.emptySubtext}>开始使用钱包，记录您的第一笔交易</ThemedText>
+        </ThemedView>
+      </ThemedView>
+
+      {/* 常用功能 */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>常用功能</ThemedText>
+        <ThemedView style={styles.featuresGrid}>
+          <TouchableOpacity style={styles.featureItem}>
+            <Ionicons name="wallet-outline" size={24} color="#333333" />
+            <ThemedText style={styles.featureText}>钱包管理</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.featureItem}>
+            <Ionicons name="scan-outline" size={24} color="#333333" />
+            <ThemedText style={styles.featureText}>扫一扫</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.featureItem}>
+            <Ionicons name="shield-checkmark-outline" size={24} color="#333333" />
+            <ThemedText style={styles.featureText}>安全设置</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.featureItem}>
+            <Ionicons name="help-circle-outline" size={24} color="#333333" />
+            <ThemedText style={styles.featureText}>帮助中心</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.featureItem}>
+            <Ionicons name="receipt-outline" size={24} color="#333333" />
+            <ThemedText style={styles.featureText}>交易历史</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.featureItem}>
+            <Ionicons name="settings-outline" size={24} color="#333333" />
+            <ThemedText style={styles.featureText}>系统设置</ThemedText>
+          </TouchableOpacity>
+        </ThemedView>
       </ThemedView>
     </ParallaxScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  header: {
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    zIndex: 100,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    height: 56,
+  },
+  logo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
   },
-  stepContainer: {
-    gap: 8,
+  logoText: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginLeft: 6,
+  },
+  assetsOverview: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 30,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  sectionLabel: {
+    fontSize: 14,
+    color: '#555555',
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  totalBalance: {
+    fontSize: 32,
+    fontWeight: '700',
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  fiatAmount: {
+    fontSize: 16,
+    color: '#555555',
+  },
+  balanceChange: {
+    marginTop: 8,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 32,
+    gap: 12,
+  },
+  actionBtn: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  actionIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#e0e0e0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  actionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  sectionContainer: {
+    marginBottom: 32,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  seeAll: {
+    fontSize: 14,
+    color: '#000000',
+    fontWeight: '500',
+  },
+  assetItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  assetInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  assetIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assetSymbol: {
+    fontSize: 13,
+    color: '#555555',
+    marginTop: 2,
+  },
+  assetValue: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  fiatValue: {
+    fontSize: 13,
+    color: '#555555',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 50,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  emptyText: {
+    fontSize: 16,
+    marginTop: 16,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    marginTop: 6,
+    color: '#555555',
+  },
+  featuresGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 20,
+  },
+  featureItem: {
+    width: '48%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  featureText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#000000',
   },
 });

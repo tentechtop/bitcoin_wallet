@@ -4,22 +4,58 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="" />
+    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="init">
+      <change afterPath="$PROJECT_DIR$/APK打包指南.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/assets.tsx" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/market.tsx" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/transactions.tsx" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/assets/images/bitcoin-icons.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/(tabs)/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(tabs)/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/components/parallax-scroll-view.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/components/parallax-scroll-view.tsx" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
   <component name="MacroExpansionManager">
     <option name="directoryName" value="wDqVNe7w" />
   </component>
+  <component name="ProjectLevelVcsManager">
+    <ConfirmationsSetting value="2" id="Add" />
+  </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
+    "last_opened_file_path": "F:/workSpace2026/blockchain/bitcoin-wallet/assets/images",
     "node.js.selected.package.tslint": "(autodetect)",
+    "project.structure.last.edited": "Libraries",
+    "project.structure.proportion": "0.0",
+    "project.structure.side.proportion": "0.2",
     "ts.external.directory.path": "D:\\SoftwareSpace\\IDEA2025\\IntelliJ IDEA 2025.2.4\\plugins\\javascript-plugin\\jsLanguageServicesImpl\\external"
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="F:\workSpace2026\blockchain\bitcoin-wallet\assets\images" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="F:\workSpace2026\blockchain\bitcoin-wallet\app\(tabs)" />
+    </key>
+  </component>
   <component name="TaskManager">
+    <task id="LOCAL-00001" summary="init">
+      <option name="closed" value="true" />
+      <created>1772155126091</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1772155126091</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -32,5 +68,9 @@
         </entry>
       </map>
     </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="init" />
+    <option name="LAST_COMMIT_MESSAGE" value="init" />
   </component>
 </project>
