@@ -164,7 +164,10 @@ export default function WalletManagementScreen() {
                             <View style={styles.actionButtons}>
                                 <TouchableOpacity
                                     style={[styles.actionButton, styles.addressListButton]}
-                                    onPress={() => router.push('/address-list')}
+                                    onPress={() => router.push({
+                                        pathname: '/address-list',
+                                        params: { walletId: wallet.id }
+                                    })}
                                 >
                                     <Text style={styles.actionButtonText}>地址列表</Text>
                                 </TouchableOpacity>

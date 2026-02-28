@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, TextInput, Modal, ScrollView } from 'react-native';
 import { statusBarHeight } from '@/constants/theme';
 import { multiWalletStorage } from '@/utils/secureStorage';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 
@@ -14,54 +14,52 @@ interface WalletAddress {
 }
 
 export default function AddressListScreen() {
-    const [wallets, setWallets] = useState<any[]>([]);
+    const { walletId } = useLocalSearchParams<{ walletId: string }>();
+    const [wallet, setWallet] = useState<any>(null);
     const [addresses, setAddresses] = useState<WalletAddress[]>([]);
-    const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
     const [selectedAddressIndex, setSelectedAddressIndex] = useState<number | null>(null);
     const [deletePassword, setDeletePassword] = useState('');
 
     useEffect(() => {
-        loadWallets();
-    }, []);
+        if (walletId) {
+            loadWallet();
+        }
+    }, [walletId]);
 
-    const loadWallets = async () => {
+    const loadWallet = async () => {
+        if (!walletId) {
+            setLoading(false);
+            return;
+        }
+
         try {
-            const [walletsList, activeId] = await Promise.all([
-                multiWalletStorage.getWallets(),
-                multiWalletStorage.getActiveWalletId()
-            ]);
-            setWallets(walletsList);
-            setActiveWalletId(activeId);
-            loadAddresses(activeId, walletsList);
+            const walletData = await multiWalletStorage.getWalletById(walletId);
+            if (walletData) {
+                setWallet(walletData);
+                loadAddresses(walletData);
+            } else {
+                Alert.alert('错误', '钱包不存在');
+                router.back();
+            }
         } catch (error) {
             console.error('加载钱包失败:', error);
-            Alert.alert('错误', '加载钱包列表失败');
+            Alert.alert('错误', '加载钱包失败');
         } finally {
             setLoading(false);
         }
     };
 
-    const loadAddresses = (walletId: string | null, walletsList: any[]) => {
-        if (!walletId) {
-            setAddresses([]);
-            return;
-        }
-        const wallet = walletsList.find(w => w.id === walletId);
-        if (wallet && wallet.addresses) {
-            const parsedAddresses = wallet.addresses.map((addr: any) => 
+    const loadAddresses = (walletData: any) => {
+        if (walletData && walletData.addresses) {
+            const parsedAddresses = walletData.addresses.map((addr: any) => 
                 typeof addr === 'string' ? { address: addr, path: '', publicKey: '', privateKey: '' } as WalletAddress : addr
             );
             setAddresses(parsedAddresses);
         } else {
             setAddresses([]);
         }
-    };
-
-    const handleWalletChange = (walletId: string) => {
-        setActiveWalletId(walletId);
-        loadAddresses(walletId, wallets);
     };
 
     const handleCopyAddress = async (address: string) => {
@@ -76,13 +74,13 @@ export default function AddressListScreen() {
     };
 
     const confirmDeleteAddress = async () => {
-        if (!activeWalletId || selectedAddressIndex === null) {
+        if (!walletId || selectedAddressIndex === null) {
             return;
         }
 
         try {
             // 验证钱包密码
-            const isPasswordValid = await multiWalletStorage.verifyWalletPassword(activeWalletId, deletePassword);
+            const isPasswordValid = await multiWalletStorage.verifyWalletPassword(walletId, deletePassword);
             if (!isPasswordValid) {
                 Alert.alert('错误', '密码错误，请重新输入');
                 setDeletePassword('');
@@ -90,13 +88,13 @@ export default function AddressListScreen() {
             }
 
             // 删除地址
-            const wallet = await multiWalletStorage.getWalletById(activeWalletId);
-            if (wallet) {
-                const updatedAddresses = wallet.addresses.filter((_: any, i: number) => i !== selectedAddressIndex);
-                await multiWalletStorage.updateWallet(activeWalletId, { addresses: updatedAddresses });
+            const walletData = await multiWalletStorage.getWalletById(walletId);
+            if (walletData) {
+                const updatedAddresses = walletData.addresses.filter((_: any, i: number) => i !== selectedAddressIndex);
+                await multiWalletStorage.updateWallet(walletId, { addresses: updatedAddresses });
 
                 // 重新加载地址列表
-                loadAddresses(activeWalletId, wallets);
+                loadAddresses(walletData);
 
                 Alert.alert('成功', '地址已删除');
                 setDeleteModalVisible(false);
@@ -125,34 +123,16 @@ export default function AddressListScreen() {
 
     return (
         <View style={styles.container}>
-            {/* 钱包选择器 */}
-            {wallets.length > 0 && (
-                <View style={styles.walletSelector}>
-                    <Text style={styles.selectorLabel}>选择钱包:</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.walletScrollView}>
-                        {wallets.map((wallet) => (
-                            <TouchableOpacity
-                                key={wallet.id}
-                                style={[
-                                    styles.walletButton,
-                                    activeWalletId === wallet.id && styles.activeWalletButton
-                                ]}
-                                onPress={() => handleWalletChange(wallet.id)}
-                            >
-                                <Text style={[
-                                    styles.walletButtonText,
-                                    activeWalletId === wallet.id && styles.activeWalletButtonText
-                                ]}>
-                                    {wallet.name}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
+            {/* 钱包信息 */}
+            {wallet && (
+                <View style={styles.walletInfo}>
+                    <Text style={styles.walletName}>{wallet.name}</Text>
+                    <Text style={styles.addressCount}>共 {addresses.length} 个地址</Text>
                 </View>
             )}
 
             {/* 地址列表 */}
-            {activeWalletId && addresses.length > 0 ? (
+            {addresses.length > 0 ? (
                 <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
                     {addresses.map((addr, index) => (
                         <View key={index} style={styles.addressCard}>
@@ -212,9 +192,7 @@ export default function AddressListScreen() {
                 </ScrollView>
             ) : (
                 <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>
-                        {!activeWalletId ? '请选择一个钱包' : '该钱包暂无地址'}
-                    </Text>
+                    <Text style={styles.emptyText}>该钱包暂无地址</Text>
                 </View>
             )}
 
@@ -271,40 +249,22 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#666',
     },
-    walletSelector: {
+    walletInfo: {
         paddingHorizontal: 16,
         paddingVertical: 12,
         backgroundColor: '#ffffff',
         borderBottomWidth: 1,
         borderBottomColor: '#e8e8e8',
     },
-    selectorLabel: {
+    walletName: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#000000',
+        marginBottom: 4,
+    },
+    addressCount: {
         fontSize: 14,
         color: '#666',
-        marginBottom: 8,
-    },
-    walletScrollView: {
-        flexDirection: 'row',
-    },
-    walletButton: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        backgroundColor: '#f8f9fa',
-        borderRadius: 8,
-        marginRight: 8,
-        borderWidth: 1,
-        borderColor: '#e8e8e8',
-    },
-    activeWalletButton: {
-        backgroundColor: '#007AFF',
-        borderColor: '#007AFF',
-    },
-    walletButtonText: {
-        fontSize: 14,
-        color: '#666',
-    },
-    activeWalletButtonText: {
-        color: '#ffffff',
     },
     scrollView: {
         flex: 1,

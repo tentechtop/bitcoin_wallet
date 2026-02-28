@@ -4,17 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="完成助记词生成">
-      <change afterPath="$PROJECT_DIR$/app/address-list.tsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/create-address.tsx" afterDir="false" />
+    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="增加地址管理">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/(tabs)/_layout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(tabs)/_layout.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/(tabs)/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(tabs)/index.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/_layout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/_layout.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/create-wallet.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/create-wallet.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/address-list.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/address-list.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/wallet-management.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/wallet-management.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/本地打包.txt" beforeDir="false" afterPath="$PROJECT_DIR$/本地打包.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -107,7 +100,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772182853584</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="增加地址管理">
+      <option name="closed" value="true" />
+      <created>1772249874166</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1772249874166</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -130,7 +131,8 @@
     <MESSAGE value="增加打包提示" />
     <MESSAGE value="增加钱包添加" />
     <MESSAGE value="完成助记词生成" />
-    <option name="LAST_COMMIT_MESSAGE" value="完成助记词生成" />
+    <MESSAGE value="增加地址管理" />
+    <option name="LAST_COMMIT_MESSAGE" value="增加地址管理" />
     <option name="NON_MODAL_COMMIT_POSTPONE_SLOW_CHECKS" value="false" />
   </component>
 </project>
