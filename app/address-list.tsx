@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, TextInput, Modal, ScrollView } from 'react-native';
-import { statusBarHeight } from '@/constants/theme';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, TextInput, Modal, ScrollView, ActivityIndicator } from 'react-native';
 import { multiWalletStorage } from '@/utils/secureStorage';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
+import { getAddressBalance, formatBTCBalance } from '@/utils/blockchainApi';
 
 interface WalletAddress {
     path: string;
@@ -21,6 +21,8 @@ export default function AddressListScreen() {
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
     const [selectedAddressIndex, setSelectedAddressIndex] = useState<number | null>(null);
     const [deletePassword, setDeletePassword] = useState('');
+    const [addressBalances, setAddressBalances] = useState<{ [key: number]: { balance: number; utxoCount: number } }>({});
+    const [loadingAddressIndex, setLoadingAddressIndex] = useState<number | null>(null);
 
     useEffect(() => {
         if (walletId) {
@@ -53,9 +55,18 @@ export default function AddressListScreen() {
 
     const loadAddresses = (walletData: any) => {
         if (walletData && walletData.addresses) {
-            const parsedAddresses = walletData.addresses.map((addr: any) => 
-                typeof addr === 'string' ? { address: addr, path: '', publicKey: '', privateKey: '' } as WalletAddress : addr
-            );
+            const parsedAddresses = walletData.addresses.map((addr: any) => {
+                if (typeof addr === 'string') {
+                    return { address: addr, path: '', publicKey: '', privateKey: '' } as WalletAddress;
+                } else if (typeof addr === 'object' && addr.address) {
+                    // 确保对象有 address 属性
+                    return addr as WalletAddress;
+                } else {
+                    console.error('无效的地址格式:', addr);
+                    return null;
+                }
+            }).filter((addr: WalletAddress | null) => addr !== null); // 过滤掉无效地址
+
             setAddresses(parsedAddresses);
         } else {
             setAddresses([]);
@@ -65,6 +76,25 @@ export default function AddressListScreen() {
     const handleCopyAddress = async (address: string) => {
         await Clipboard.setStringAsync(address);
         Alert.alert('成功', '地址已复制');
+    };
+
+    const handleQueryBalance = async (address: string, index: number) => {
+        setLoadingAddressIndex(index);
+        try {
+            const result = await getAddressBalance(address);
+            setAddressBalances(prev => ({
+                ...prev,
+                [index]: {
+                    balance: result.balanceBTC,
+                    utxoCount: result.utxoCount
+                }
+            }));
+        } catch (error) {
+            console.error('查询地址余额失败:', error);
+            Alert.alert('错误', '查询余额失败');
+        } finally {
+            setLoadingAddressIndex(null);
+        }
     };
 
     const handleDeleteAddress = (index: number) => {
@@ -140,6 +170,31 @@ export default function AddressListScreen() {
                                 <Text style={styles.addressIndex}>地址 #{index + 1}</Text>
                                 {addr.path && (
                                     <Text style={styles.pathText}>路径: {formatPath(addr.path)}</Text>
+                                )}
+                            </View>
+
+                            {/* 余额显示 */}
+                            <View style={styles.balanceContainer}>
+                                <Text style={styles.balanceLabel}>余额:</Text>
+                                {addressBalances[index] ? (
+                                    <Text style={styles.balanceValue}>
+                                        {formatBTCBalance(addressBalances[index].balance)} BTC
+                                        {addressBalances[index].utxoCount > 0 && (
+                                            <Text style={styles.utxoCount}> ({addressBalances[index].utxoCount} UTXO)</Text>
+                                        )}
+                                    </Text>
+                                ) : (
+                                    <TouchableOpacity
+                                        style={styles.queryBalanceButton}
+                                        onPress={() => handleQueryBalance(addr.address, index)}
+                                        disabled={loadingAddressIndex === index}
+                                    >
+                                        {loadingAddressIndex === index ? (
+                                            <ActivityIndicator size="small" color="#007AFF" />
+                                        ) : (
+                                            <Text style={styles.queryBalanceText}>查询余额</Text>
+                                        )}
+                                    </TouchableOpacity>
                                 )}
                             </View>
 
@@ -291,6 +346,39 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#999',
         fontFamily: 'monospace',
+    },
+    balanceContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f8f9fa',
+        borderRadius: 8,
+        padding: 12,
+        marginBottom: 12,
+    },
+    balanceLabel: {
+        fontSize: 14,
+        color: '#666',
+        marginRight: 8,
+    },
+    balanceValue: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#007AFF',
+    },
+    utxoCount: {
+        fontSize: 12,
+        color: '#999',
+    },
+    queryBalanceButton: {
+        paddingVertical: 4,
+        paddingHorizontal: 12,
+        backgroundColor: '#007AFF',
+        borderRadius: 4,
+    },
+    queryBalanceText: {
+        fontSize: 14,
+        color: '#FFFFFF',
+        fontWeight: '600',
     },
     addressContainer: {
         backgroundColor: '#f8f9fa',

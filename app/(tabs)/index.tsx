@@ -1,4 +1,4 @@
-import { StyleSheet, TouchableOpacity, View, Modal, TextInput, ScrollView, Alert, ActivityIndicator, Animated } from 'react-native';
+import { StyleSheet, TouchableOpacity, View, Modal, TextInput, ScrollView, Alert, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useRef, useEffect } from 'react';
 
@@ -7,10 +7,14 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Link } from 'expo-router';
 import { statusBarHeight } from '@/constants/theme';
+import { multiWalletStorage } from '@/utils/secureStorage';
+import { getWalletBalance, formatBTCBalance } from '@/utils/blockchainApi';
 
 export default function HomeScreen() {
   const [showSendModal, setShowSendModal] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [totalBalance, setTotalBalance] = useState<number>(0);
+  const [loadingBalance, setLoadingBalance] = useState(false);
 
   const sendSlideAnim = useRef(new Animated.Value(500)).current;
   const receiveSlideAnim = useRef(new Animated.Value(500)).current;
@@ -46,6 +50,40 @@ export default function HomeScreen() {
   const getCoinUnitList = (coinIndex: number) => {
     return coinList[coinIndex]?.unit || ['BTC', 'Satoshi'];
   };
+
+  // 加载钱包余额
+  const loadWalletBalance = async () => {
+    try {
+      setLoadingBalance(true);
+      const walletId = await multiWalletStorage.getActiveWalletId();
+      if (!walletId) {
+        console.log('未找到激活的钱包');
+        return;
+      }
+      const wallet = await multiWalletStorage.getWalletById(walletId);
+
+      if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
+        console.log('钱包没有地址');
+        setTotalBalance(0);
+        return;
+      }
+
+      // 查询钱包余额
+      const balanceInfo = await getWalletBalance(wallet.addresses, 2);
+      setTotalBalance(balanceInfo.totalBalanceBTC);
+
+      // 更新钱包中的余额字段
+      await multiWalletStorage.updateWalletBalance(walletId, balanceInfo.totalBalanceBTC);
+    } catch (error) {
+      console.error('加载钱包余额失败:', error);
+    } finally {
+      setLoadingBalance(false);
+    }
+  };
+
+  useEffect(() => {
+    loadWalletBalance();
+  }, []);
 
   const handleSendPress = () => {
     setShowSendModal(true);
@@ -153,7 +191,14 @@ export default function HomeScreen() {
       {/* 资产概览 */}
       <ThemedView style={styles.assetsOverview}>
         <ThemedText style={styles.sectionLabel}>总资产</ThemedText>
-        <ThemedText type="title" style={styles.totalBalance}>0.0000 BTC</ThemedText>
+        <ThemedText type="title" style={styles.totalBalance}>
+          {loadingBalance ? '加载中...' : `${formatBTCBalance(totalBalance)} BTC`}
+        </ThemedText>
+        {!loadingBalance && (
+          <TouchableOpacity onPress={loadWalletBalance} style={styles.refreshBtn}>
+            <Ionicons name="refresh" size={16} color="#666666" />
+          </TouchableOpacity>
+        )}
       </ThemedView>
 
       {/* 快速操作 */}
@@ -516,6 +561,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 8,
     letterSpacing: 0.5,
+  },
+  refreshBtn: {
+    position: 'absolute',
+    right: 10,
+    top: 8,
+    padding: 8,
   },
   fiatAmount: {
     fontSize: 16,

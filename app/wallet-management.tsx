@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { multiWalletStorage, Wallet } from '@/utils/secureStorage';
 import { router, useFocusEffect } from 'expo-router';
+import { getWalletBalance, formatBTCBalance } from '@/utils/blockchainApi';
 
 export default function WalletManagementScreen() {
     const [wallets, setWallets] = useState<Wallet[]>([]);
     const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [refreshingWalletId, setRefreshingWalletId] = useState<string | null>(null);
 
     // 使用 useFocusEffect 在页面聚焦时刷新
     useFocusEffect(
@@ -41,6 +43,35 @@ export default function WalletManagementScreen() {
         } catch (error) {
             console.error('设置激活钱包失败:', error);
             Alert.alert('错误', '设置激活钱包失败');
+        }
+    };
+
+    const handleRefreshBalance = async (walletId: string) => {
+        setRefreshingWalletId(walletId);
+        try {
+            const wallet = await multiWalletStorage.getWalletById(walletId);
+            if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
+                Alert.alert('提示', '该钱包没有地址，无法查询余额');
+                return;
+            }
+
+            // 查询钱包余额
+            const balanceInfo = await getWalletBalance(wallet.addresses);
+
+            // 更新存储中的钱包余额
+            await multiWalletStorage.updateWalletBalance(walletId, balanceInfo.totalBalanceBTC);
+
+            // 只更新本地状态中的钱包，不重新加载整个列表
+            setWallets(prevWallets =>
+                prevWallets.map(w =>
+                    w.id === walletId ? { ...w, balance: balanceInfo.totalBalanceBTC } : w
+                )
+            );
+        } catch (error) {
+            console.error('刷新余额失败:', error);
+            Alert.alert('错误', '刷新余额失败');
+        } finally {
+            setRefreshingWalletId(null);
         }
     };
 
@@ -112,7 +143,15 @@ export default function WalletManagementScreen() {
                     </TouchableOpacity>
                 </View>
             ) : (
-                <ScrollView style={styles.walletList} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                    style={styles.walletList}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.walletListContent}
+                    maintainVisibleContentPosition={{
+                        minIndexForVisible: 0,
+                        autoscrollToTopThreshold: 10
+                    }}
+                >
                     {wallets.map((wallet) => (
                         <View
                             key={wallet.id}
@@ -139,6 +178,17 @@ export default function WalletManagementScreen() {
                                     <Text style={styles.balance}>
                                         {formatBalance(wallet.balance)} BTC
                                     </Text>
+                                    <TouchableOpacity
+                                        onPress={() => handleRefreshBalance(wallet.id)}
+                                        disabled={refreshingWalletId === wallet.id}
+                                        style={styles.refreshButton}
+                                    >
+                                        {refreshingWalletId === wallet.id ? (
+                                            <ActivityIndicator size="small" color="#007AFF" />
+                                        ) : (
+                                            <Text style={styles.refreshButtonText}>刷新</Text>
+                                        )}
+                                    </TouchableOpacity>
                                 </View>
                             </View>
 
@@ -259,6 +309,9 @@ const styles = StyleSheet.create({
     walletList: {
         flex: 1,
     },
+    walletListContent: {
+        paddingBottom: 20,
+    },
     walletCard: {
         backgroundColor: '#F5F5F5',
         borderRadius: 12,
@@ -312,6 +365,18 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '700',
         color: '#007AFF',
+    },
+    refreshButton: {
+        marginTop: 4,
+        paddingVertical: 4,
+        paddingHorizontal: 8,
+        backgroundColor: '#E3F2FD',
+        borderRadius: 4,
+    },
+    refreshButtonText: {
+        fontSize: 12,
+        color: '#007AFF',
+        fontWeight: '600',
     },
     walletDetails: {
         backgroundColor: 'rgba(0, 0, 0, 0.05)',

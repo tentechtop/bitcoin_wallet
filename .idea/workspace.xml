@@ -4,9 +4,14 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="删除地址生成">
+    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="完善钱包">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/create-wallet.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/create-wallet.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/(tabs)/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(tabs)/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/address-list.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/address-list.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/wallet-management.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/wallet-management.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/secureStorage.ts" beforeDir="false" afterPath="$PROJECT_DIR$/utils/secureStorage.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -23,18 +28,19 @@
   <component name="ProjectLevelVcsManager">
     <ConfirmationsSetting value="2" id="Add" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;last_opened_file_path&quot;: &quot;F:/workSpace2026/blockchain/bitcoin-wallet&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;project.structure.last.edited&quot;: &quot;Libraries&quot;,
-    &quot;project.structure.proportion&quot;: &quot;0.0&quot;,
-    &quot;project.structure.side.proportion&quot;: &quot;0.2&quot;,
-    &quot;ts.external.directory.path&quot;: &quot;D:\\SoftwareSpace\\IDEA2025\\IntelliJ IDEA 2025.2.4\\plugins\\javascript-plugin\\jsLanguageServicesImpl\\external&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "last_opened_file_path": "F:/workSpace2026/blockchain/bitcoin-wallet/utils",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "project.structure.last.edited": "Libraries",
+    "project.structure.proportion": "0.0",
+    "project.structure.side.proportion": "0.2",
+    "ts.external.directory.path": "D:\\SoftwareSpace\\IDEA2025\\IntelliJ IDEA 2025.2.4\\plugins\\javascript-plugin\\jsLanguageServicesImpl\\external"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="F:\workSpace2026\blockchain\bitcoin-wallet\utils" />
       <recent name="F:\workSpace2026\blockchain\bitcoin-wallet" />
       <recent name="F:\workSpace2026\blockchain\bitcoin-wallet\android" />
       <recent name="F:\workSpace2026\blockchain\bitcoin-wallet\assets\images" />
@@ -116,7 +122,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772262788956</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="完善钱包">
+      <option name="closed" value="true" />
+      <created>1772264210281</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1772264210281</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -141,7 +155,8 @@
     <MESSAGE value="完成助记词生成" />
     <MESSAGE value="增加地址管理" />
     <MESSAGE value="删除地址生成" />
-    <option name="LAST_COMMIT_MESSAGE" value="删除地址生成" />
+    <MESSAGE value="完善钱包" />
+    <option name="LAST_COMMIT_MESSAGE" value="完善钱包" />
     <option name="NON_MODAL_COMMIT_POSTPONE_SLOW_CHECKS" value="false" />
   </component>
 </project>

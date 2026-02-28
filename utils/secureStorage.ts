@@ -64,6 +64,14 @@ function generateWalletId(): string {
   return 'wallet_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
 
+// 钱包地址接口
+export interface WalletAddress {
+    path: string;
+    address: string;
+    publicKey: string;
+    privateKey: string;
+}
+
 // 钱包数据接口
 export interface Wallet {
   id: string;
@@ -73,7 +81,7 @@ export interface Wallet {
   encryptedSeed: string;
   encryptedPassword: string;
   balance: number;
-  addresses: string[];
+  addresses: (string | WalletAddress)[];
   createdAt: number;
   updatedAt: number;
 }
@@ -135,14 +143,14 @@ export const multiWalletStorage = {
     try {
       const wallets = await this.getWallets();
       const index = wallets.findIndex(w => w.id === walletId);
-      
+
       if (index >= 0) {
         const updatedWallet = {
           ...wallets[index],
           ...updateData,
           updatedAt: Date.now()
         };
-        
+
         // 如果需要更新敏感信息且提供了密码
         if (password && (updateData.mnemonic || updateData.seed)) {
           if (updateData.mnemonic) {
@@ -152,7 +160,7 @@ export const multiWalletStorage = {
             updatedWallet.encryptedSeed = encrypt(updateData.seed, password);
           }
         }
-        
+
         wallets[index] = updatedWallet;
         await storage.setItemAsync(WALLETS_STORAGE_KEY, JSON.stringify(wallets));
         return updatedWallet;
@@ -161,6 +169,17 @@ export const multiWalletStorage = {
     } catch (error) {
       console.error('更新钱包失败:', error);
       return null;
+    }
+  },
+
+  // 更新钱包余额
+  async updateWalletBalance(walletId: string, balance: number): Promise<boolean> {
+    try {
+      const wallet = await this.updateWallet(walletId, { balance });
+      return wallet !== null;
+    } catch (error) {
+      console.error('更新钱包余额失败:', error);
+      return false;
     }
   },
 
