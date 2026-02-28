@@ -272,7 +272,7 @@ export default function CreateWalletScreen() {
                     </View>
                 </View>
 
-                <View style={styles.formItem}>
+{/*                <View style={styles.formItem}>
                     <Text style={styles.formLabel}>钱包密码（可选）</Text>
                     <TextInput
                         style={styles.formInput}
@@ -294,7 +294,7 @@ export default function CreateWalletScreen() {
                         placeholderTextColor="#999"
                         secureTextEntry
                     />
-                </View>
+                </View>*/}
 
                 {/* 导入助记词 */}
                 <View style={styles.formItem}>
