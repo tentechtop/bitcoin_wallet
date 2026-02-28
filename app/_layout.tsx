@@ -32,6 +32,8 @@ export default function RootLayout() {
                 <Stack.Screen name="create-wallet" options={{ title: '创建钱包' }} />
                 <Stack.Screen name="create-address" options={{ title: '创建地址' }} />
                 <Stack.Screen name="address-list" options={{ title: '地址管理' }} />
+                <Stack.Screen name="tx-detail" options={{ title: '交易详情' }} />
+                <Stack.Screen name="transactions" options={{ title: '交易历史' }} />
             </Stack>
             <StatusBar style="auto" />
         </ThemeProvider>

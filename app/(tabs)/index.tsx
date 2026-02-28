@@ -1,20 +1,33 @@
 import { StyleSheet, TouchableOpacity, View, Modal, TextInput, ScrollView, Alert, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useRef, useEffect } from 'react';
+import * as Clipboard from 'expo-clipboard';
+import QRCode from 'react-native-qrcode-svg';
+import { useRouter } from 'expo-router';
 
 import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Link } from 'expo-router';
 import { statusBarHeight } from '@/constants/theme';
-import { multiWalletStorage } from '@/utils/secureStorage';
-import { getWalletBalance, formatBTCBalance } from '@/utils/blockchainApi';
+import { multiWalletStorage, WalletAddress } from '@/utils/secureStorage';
+import {
+  getWalletBalance,
+  formatBTCBalance,
+  getTxListByAddressInTxPool,
+  calculateScriptPubKey,
+  formatTransactionList,
+  Transaction
+} from '@/utils/blockchainApi';
 
 export default function HomeScreen() {
+  const router = useRouter();
   const [showSendModal, setShowSendModal] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [totalBalance, setTotalBalance] = useState<number>(0);
   const [loadingBalance, setLoadingBalance] = useState(false);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loadingTransactions, setLoadingTransactions] = useState(false);
 
   const sendSlideAnim = useRef(new Animated.Value(500)).current;
   const receiveSlideAnim = useRef(new Animated.Value(500)).current;
@@ -36,10 +49,10 @@ export default function HomeScreen() {
 
   const [receiveData, setReceiveData] = useState({
     coinIndex: 0,
-    accountIndex: '0',
     addressIndex: '0',
     derivedPath: '',
     derivedAddress: '',
+    addressList: [] as (string | WalletAddress)[], // 地址列表
   });
 
   const coinList = [
@@ -83,7 +96,72 @@ export default function HomeScreen() {
 
   useEffect(() => {
     loadWalletBalance();
+    loadTransactions();
   }, []);
+
+  // 加载交易记录
+  const loadTransactions = async () => {
+    try {
+      setLoadingTransactions(true);
+
+      // 获取第一个地址来查询交易
+      const wallet = await multiWalletStorage.getActiveWallet();
+      if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
+        console.log('钱包没有地址,无法查询交易');
+        setTransactions([]);
+        return;
+      }
+
+      // 使用第一个地址
+      const firstAddress = wallet.addresses[0];
+      const addressStr = typeof firstAddress === 'string' ? firstAddress : firstAddress.address;
+
+      // 计算 scriptPubKey
+      const myScriptPubKey = await calculateScriptPubKey(addressStr);
+      console.log('查询交易池 - 地址:', myScriptPubKey);
+
+      // 查询交易池
+      const txPoolData = await getTxListByAddressInTxPool(addressStr);
+      console.log('交易池查询结果:', txPoolData);
+
+      if (txPoolData && txPoolData.length > 0) {
+        // 格式化交易数据
+        const formattedTxs = formatTransactionList(txPoolData, myScriptPubKey);
+        setTransactions(formattedTxs.slice(0, 10)); // 只显示最近10条
+      } else {
+        setTransactions([
+          {
+            id: 'empty',
+            txId: '',
+            title: '暂无交易记录',
+            time: '',
+            amount: '',
+            type: 'empty',
+            icon: 'document-text-outline',
+            status: 'empty',
+            statusText: ''
+          }
+        ]);
+      }
+    } catch (error) {
+      console.error('加载交易记录失败:', error);
+      setTransactions([
+        {
+          id: 'empty',
+          txId: '',
+          title: '暂无交易记录',
+          time: '',
+          amount: '',
+          type: 'empty',
+          icon: 'document-text-outline',
+          status: 'empty',
+          statusText: ''
+        }
+      ]);
+    } finally {
+      setLoadingTransactions(false);
+    }
+  };
 
   const handleSendPress = () => {
     setShowSendModal(true);
@@ -101,20 +179,51 @@ export default function HomeScreen() {
     ]).start();
   };
 
-  const handleReceivePress = () => {
-    setShowReceiveModal(true);
-    Animated.parallel([
-      Animated.timing(receiveOverlayAnim, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(receiveSlideAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
+  const handleReceivePress = async () => {
+    // 加载钱包地址
+    try {
+      const walletId = await multiWalletStorage.getActiveWalletId();
+      if (!walletId) {
+        Alert.alert('提示', '请先创建或选择钱包');
+        return;
+      }
+      const wallet = await multiWalletStorage.getWalletById(walletId);
+
+      if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
+        Alert.alert('提示', '钱包中没有地址，请先生成地址');
+        return;
+      }
+
+      // 设置默认接收地址（第一个地址）
+      const firstAddress = wallet.addresses[0];
+      const addressStr = typeof firstAddress === 'string' ? firstAddress : firstAddress.address;
+      const pathStr = typeof firstAddress === 'string' ? '' : firstAddress.path;
+
+      setReceiveData(prev => ({
+        ...prev,
+        addressList: wallet.addresses,
+        addressIndex: '0',
+        derivedPath: pathStr,
+        derivedAddress: addressStr,
+      }));
+
+      setShowReceiveModal(true);
+      Animated.parallel([
+        Animated.timing(receiveOverlayAnim, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.timing(receiveSlideAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } catch (error) {
+      console.error('加载钱包地址失败:', error);
+      Alert.alert('错误', '加载钱包地址失败');
+    }
   };
 
   const closeSendModal = () => {
@@ -163,16 +272,34 @@ export default function HomeScreen() {
     });
     setReceiveData({
       coinIndex: 0,
-      accountIndex: '0',
       addressIndex: '0',
       derivedPath: '',
       derivedAddress: '',
+      addressList: [],
     });
   };
 
   const handleConfirmSend = () => {
     // TODO: 实现发送逻辑
     Alert.alert('发送功能', '发送功能开发中');
+  };
+
+  const handleCopyAddress = async (address: string) => {
+    try {
+      await Clipboard.setStringAsync(address);
+    } catch (error) {
+      console.error('复制失败:', error);
+      Alert.alert('错误', '复制失败');
+    }
+  };
+
+  const handleTransactionPress = (tx: Transaction) => {
+    if (tx.id === 'empty') {
+      return;
+    }
+    // 将交易数据编码后传递
+    const txDataEncoded = encodeURIComponent(JSON.stringify(tx));
+    router.push(`/tx-detail?txData=${txDataEncoded}`);
   };
 
   return (
@@ -234,16 +361,61 @@ export default function HomeScreen() {
       <ThemedView style={styles.sectionContainer}>
         <ThemedView style={styles.sectionHeader}>
           <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>交易记录</ThemedText>
-          <Link href="/transactions" asChild>
-            <ThemedText style={styles.seeAll}>查看全部</ThemedText>
-          </Link>
+          <TouchableOpacity onPress={loadTransactions}>
+            <Ionicons name="refresh" size={16} color="#666666" />
+          </TouchableOpacity>
         </ThemedView>
 
-        <ThemedView style={styles.emptyState}>
-          <Ionicons name="document-text-outline" size={48} color="#888888" />
-          <ThemedText style={styles.emptyText}>暂无交易记录</ThemedText>
-          <ThemedText style={styles.emptySubtext}>开始使用钱包，记录您的第一笔交易</ThemedText>
-        </ThemedView>
+        {loadingTransactions ? (
+          <ThemedView style={styles.emptyState}>
+            <ThemedText style={styles.emptyText}>加载中...</ThemedText>
+          </ThemedView>
+        ) : transactions.length === 0 || transactions[0].id === 'empty' ? (
+          <ThemedView style={styles.emptyState}>
+            <Ionicons name="document-text-outline" size={48} color="#888888" />
+            <ThemedText style={styles.emptyText}>暂无交易记录</ThemedText>
+            <ThemedText style={styles.emptySubtext}>开始使用钱包，记录您的第一笔交易</ThemedText>
+          </ThemedView>
+        ) : (
+          <View style={styles.transactionList}>
+            {transactions.map((tx) => {
+              const iconStyleKey = `transactionIcon${tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}`;
+              const statusStyleKey = `transaction${tx.status.charAt(0).toUpperCase() + tx.status.slice(1)}`;
+              const iconStyle = (styles as any)[iconStyleKey];
+              const statusStyle = (styles as any)[statusStyleKey];
+              return (
+                <TouchableOpacity
+                  key={tx.id}
+                  style={styles.transactionItem}
+                  onPress={() => handleTransactionPress(tx)}
+                  disabled={tx.id === 'empty'}
+                >
+                  <View style={styles.transactionLeft}>
+                    <View style={[styles.transactionIcon, iconStyle]}>
+                      <Ionicons
+                        name={tx.icon === 'arrow-up' ? 'arrow-up' : 'arrow-down' as any}
+                        size={16}
+                        color="#ffffff"
+                      />
+                    </View>
+                    <View style={styles.transactionDetails}>
+                      <ThemedText style={styles.transactionTitle}>{tx.title}</ThemedText>
+                      <ThemedText style={styles.transactionTime}>{tx.time}</ThemedText>
+                    </View>
+                  </View>
+                  <View style={styles.transactionRight}>
+                    <ThemedText style={[styles.transactionAmount, statusStyle]}>
+                      {tx.amount}
+                    </ThemedText>
+                    <ThemedText style={[styles.transactionStatus, statusStyle]}>
+                      {tx.statusText}
+                    </ThemedText>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
       </ThemedView>
 
       {/* 常用功能 */}
@@ -268,10 +440,12 @@ export default function HomeScreen() {
             <Ionicons name="help-circle-outline" size={24} color="#333333" />
             <ThemedText style={styles.featureText}>帮助中心</ThemedText>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.featureItem}>
-            <Ionicons name="receipt-outline" size={24} color="#333333" />
-            <ThemedText style={styles.featureText}>交易历史</ThemedText>
-          </TouchableOpacity>
+          <Link href="/transactions" asChild>
+            <TouchableOpacity style={styles.featureItem}>
+              <Ionicons name="receipt-outline" size={24} color="#333333" />
+              <ThemedText style={styles.featureText}>交易历史</ThemedText>
+            </TouchableOpacity>
+          </Link>
           <TouchableOpacity style={styles.featureItem}>
             <Ionicons name="settings-outline" size={24} color="#333333" />
             <ThemedText style={styles.featureText}>系统设置</ThemedText>
@@ -449,29 +623,42 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              {/* 账户索引 */}
-              <View style={styles.formItem}>
-                <ThemedText style={styles.formLabel}>账户索引</ThemedText>
-                <TextInput
-                  style={styles.formInput}
-                  value={receiveData.accountIndex}
-                  onChangeText={(text) => setReceiveData({ ...receiveData, accountIndex: text })}
-                  placeholder="0"
-                  keyboardType="numeric"
-                />
-              </View>
-
-              {/* 地址索引(仅比特币显示) */}
-              {coinList[receiveData.coinIndex].id === 'btc' && (
+              {/* 地址选择(仅比特币显示) */}
+              {coinList[receiveData.coinIndex].id === 'btc' && receiveData.addressList.length > 0 && (
                 <View style={styles.formItem}>
-                  <ThemedText style={styles.formLabel}>地址索引</ThemedText>
-                  <TextInput
-                    style={styles.formInput}
-                    value={receiveData.addressIndex}
-                    onChangeText={(text) => setReceiveData({ ...receiveData, addressIndex: text })}
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
+                  <ThemedText style={styles.formLabel}>接收地址</ThemedText>
+                  <ScrollView style={styles.addressList} nestedScrollEnabled>
+                    {receiveData.addressList.map((addr, index) => {
+                      const addressStr = typeof addr === 'string' ? addr : addr.address;
+                      const isSelected = index === parseInt(receiveData.addressIndex);
+                      return (
+                        <TouchableOpacity
+                          key={index}
+                          style={[
+                            styles.addressItem,
+                            isSelected && styles.addressItemSelected
+                          ]}
+                          onPress={() => {
+                            const pathStr = typeof addr === 'string' ? '' : addr.path;
+                            setReceiveData({
+                              ...receiveData,
+                              addressIndex: index.toString(),
+                              derivedPath: pathStr,
+                              derivedAddress: addressStr,
+                            });
+                          }}
+                        >
+                          <View style={styles.addressItemContent}>
+                            <ThemedText style={styles.addressIndex}>地址 {index + 1}</ThemedText>
+                            <ThemedText style={styles.addressText}>{addressStr}</ThemedText>
+                          </View>
+                          {isSelected && (
+                            <Ionicons name="checkmark-circle" size={20} color="#000000" />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
                 </View>
               )}
 
@@ -484,20 +671,32 @@ export default function HomeScreen() {
               ) : null}
 
               {/* 生成结果 */}
-              {receiveData.derivedAddress ? (
+              {receiveData.derivedAddress && (
                 <View style={styles.resultSection}>
+                  {/* 地址显示和复制 */}
                   <View style={styles.resultItem}>
-                    <ThemedText style={styles.resultLabel}>地址 (Base58):</ThemedText>
-                    <View style={styles.resultValueWithCopy}>
-                      <ThemedText style={styles.resultValue}>{receiveData.derivedAddress}</ThemedText>
-                      <TouchableOpacity style={styles.copyBtnSmall}>
-                        <Ionicons name="copy" size={14} color="#000000" />
-                        <ThemedText style={styles.copyText}>复制</ThemedText>
-                      </TouchableOpacity>
+                    <ThemedText style={styles.resultLabel}>接收地址</ThemedText>
+                    <View style={styles.addressDisplayContainer}>
+                      <ThemedText style={styles.resultValue} numberOfLines={2}>{receiveData.derivedAddress}</ThemedText>
                     </View>
+                    <TouchableOpacity
+                      style={styles.copyButton}
+                      onPress={() => handleCopyAddress(receiveData.derivedAddress)}
+                    >
+                      <Ionicons name="copy-outline" size={20} color="#FFFFFF" />
+                      <ThemedText style={styles.copyButtonText}>复制地址</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* 二维码显示 */}
+                  <View style={styles.qrCodeContainer}>
+                    <QRCode
+                      value={receiveData.derivedAddress}
+                      size={200}
+                    />
                   </View>
                 </View>
-              ) : null}
+              )}
 
               {/* 底部关闭按钮 */}
               <View style={styles.btnGroup}>
@@ -680,6 +879,78 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: '#555555',
   },
+  transactionList: {
+    gap: 12,
+  },
+  transactionItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  transactionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  transactionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transactionIconSend: {
+    backgroundColor: '#ff6b6b',
+  },
+  transactionIconReceive: {
+    backgroundColor: '#51cf66',
+  },
+  transactionIconEmpty: {
+    backgroundColor: '#868e96',
+  },
+  transactionDetails: {
+    flex: 1,
+  },
+  transactionTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#000000',
+    marginBottom: 2,
+  },
+  transactionTime: {
+    fontSize: 12,
+    color: '#888888',
+  },
+  transactionRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  transactionAmount: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  transactionPending: {
+    color: '#f59f00',
+  },
+  transactionCompleted: {
+    color: '#51cf66',
+  },
+  transactionFailed: {
+    color: '#ff6b6b',
+  },
+  transactionEmpty: {
+    color: '#868e96',
+  },
+  transactionStatus: {
+    fontSize: 12,
+    color: '#888888',
+  },
   featuresGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -738,7 +1009,8 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingTop: 20,
+    paddingBottom: 40,
   },
   formItem: {
     marginBottom: 20,
@@ -827,21 +1099,55 @@ const styles = StyleSheet.create({
   resultSection: {
     backgroundColor: '#F5F5F5',
     borderRadius: 8,
-    padding: 12,
+    padding: 16,
     marginBottom: 20,
+    alignItems: 'center',
   },
   resultItem: {
-    marginBottom: 12,
+    marginBottom: 16,
+    width: '100%',
+  },
+  qrCodeContainer: {
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
   },
   resultLabel: {
-    fontSize: 12,
-    color: '#666666',
-    marginBottom: 6,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333333',
+    marginBottom: 8,
   },
   resultValue: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#000000',
     fontFamily: 'monospace',
+    lineHeight: 18,
+  },
+  addressDisplayContainer: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#000000',
+    borderRadius: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+  },
+  copyButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   resultValueSmall: {
     fontSize: 12,
@@ -869,9 +1175,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#000000',
   },
+  addressList: {
+    maxHeight: 200,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+  },
+  addressItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  addressItemSelected: {
+    backgroundColor: '#E8E8E8',
+  },
+  addressItemContent: {
+    flex: 1,
+  },
+  addressIndex: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666666',
+    marginBottom: 2,
+  },
+  addressText: {
+    fontSize: 13,
+    color: '#000000',
+    fontFamily: 'monospace',
+  },
   btnGroup: {
     marginTop: 20,
     gap: 12,
+    marginBottom:40
   },
   btnPrimary: {
     backgroundColor: '#000000',
