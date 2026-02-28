@@ -88,7 +88,7 @@ export default function HomeScreen() {
       }),
       Animated.timing(sendSlideAnim, {
         toValue: 500,
-        duration: 300,
+        duration: 250,
         useNativeDriver: true,
       }),
     ]).start(() => {
@@ -665,6 +665,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+    paddingBottom: 20,
   },
   modalHeader: {
     flexDirection: 'row',

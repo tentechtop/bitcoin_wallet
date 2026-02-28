@@ -1,17 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
-import { statusBarHeight } from '@/constants/theme';
 import { multiWalletStorage, Wallet } from '@/utils/secureStorage';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 
 export default function WalletManagementScreen() {
     const [wallets, setWallets] = useState<Wallet[]>([]);
     const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        loadWallets();
-    }, []);
+    // 使用 useFocusEffect 在页面聚焦时刷新
+    useFocusEffect(
+        React.useCallback(() => {
+            loadWallets();
+        }, [])
+    );
 
     const loadWallets = async () => {
         setLoading(true);
@@ -80,15 +83,19 @@ export default function WalletManagementScreen() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>钱包管理</Text>
-                <TouchableOpacity
-                    style={styles.addButton}
-                    onPress={() => router.push('/create-wallet')}
-                >
-                    <Text style={styles.addButtonText}>+ 新建钱包</Text>
-                </TouchableOpacity>
-            </View>
+
+            {wallets.length !== 0 ?
+                <View style={styles.header}>
+                    <TouchableOpacity
+                        style={styles.addButton}
+                        onPress={() => router.push('/create-wallet')}
+                    >
+                        <Text style={styles.addButtonText}>+ 新建钱包</Text>
+                    </TouchableOpacity>
+                </View>
+                : null
+            }
+
 
             {loading ? (
                 <View style={styles.centerContainer}>
@@ -155,6 +162,21 @@ export default function WalletManagementScreen() {
                             </View>
 
                             <View style={styles.actionButtons}>
+                                <TouchableOpacity
+                                    style={[styles.actionButton, styles.addressListButton]}
+                                    onPress={() => router.push('/address-list')}
+                                >
+                                    <Text style={styles.actionButtonText}>地址列表</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.actionButton, styles.addressButton]}
+                                    onPress={() => router.push({
+                                        pathname: '/create-address',
+                                        params: { walletId: wallet.id }
+                                    })}
+                                >
+                                    <Text style={styles.actionButtonText}>添加地址</Text>
+                                </TouchableOpacity>
                                 {activeWalletId !== wallet.id && (
                                     <TouchableOpacity
                                         style={styles.actionButton}
@@ -181,8 +203,7 @@ export default function WalletManagementScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        padding: 20,
-        paddingTop: 20 + statusBarHeight,
+        padding: 20
     },
     header: {
         flexDirection: 'row',
@@ -325,6 +346,12 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 14,
         fontWeight: '600',
+    },
+    addressListButton: {
+        backgroundColor: '#FF9500',
+    },
+    addressButton: {
+        backgroundColor: '#34C759',
     },
     deleteButton: {
         backgroundColor: '#FF3B30',

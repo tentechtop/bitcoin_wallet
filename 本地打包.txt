@@ -41,5 +41,9 @@ npm install
 
 npx expo start  要退出到第一目录
 
+//运行到安卓模拟器
+npx expo run:android
 
 本地打包 需要将local.properties 文件放再Android目录下
+
+adb -s 11785d69 install F:\workSpace2026\blockchain\bitcoin-wallet\android\app\build\outputs\apk\release\app-release.apk

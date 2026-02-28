@@ -6,18 +6,19 @@ import * as bip39 from 'bip39';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 
+
 export default function CreateWalletScreen() {
   const [walletName, setWalletName] = useState('新钱包');
   const [mnemonic, setMnemonic] = useState('');
   const [inputMnemonic, setInputMnemonic] = useState('');
   const [seed, setSeed] = useState('');
+  const [walletPassword, setWalletPassword] = useState('');
   const [mnemonicPassword, setMnemonicPassword] = useState('');
   const [languageList] = useState(['English', '简体中文', '繁體中文', '日本語', '한국어']);
   const [languageCodes] = useState(['english', 'chinese_simplified', 'chinese_traditional', 'japanese', 'korean']);
   const [selectedLanguageIndex, setSelectedLanguageIndex] = useState(0);
   const [wordCountOptions] = useState([12, 18, 24]);
   const [selectedWordCountIndex, setSelectedWordCountIndex] = useState(0);
-  const [isGenerating, setIsGenerating] = useState(false);
 
   const hasMnemonic = mnemonic && mnemonic.length > 0;
   const hasSeed = seed && seed.length > 0;
@@ -25,26 +26,21 @@ export default function CreateWalletScreen() {
 
   const handleGenerateMnemonic = () => {
     try {
-      setIsGenerating(true);
       const languageCode = languageCodes[selectedLanguageIndex];
       const wordlist = bip39.wordlists[languageCode];
       const wordCount = wordCountOptions[selectedWordCountIndex];
       const strength = Math.floor(wordCount * 32 / 3);
-      
+
       const newMnemonic = bip39.generateMnemonic(strength, undefined, wordlist);
       setMnemonic(newMnemonic);
-      
-      // 自动生成种子
-      const password = mnemonicPassword?.trim() || '';
-      const seedBuffer = bip39.mnemonicToSeedSync(newMnemonic, password);
-      setSeed(seedBuffer.toString('hex'));
-      
+
+      // 不立即生成种子，只在保存时生成（像欧易、币安一样）
+      setSeed('');
+
       Alert.alert('成功', '助记词已生成，请妥善保管！');
     } catch (error) {
       console.error('生成助记词失败:', error);
       Alert.alert('错误', '生成助记词失败');
-    } finally {
-      setIsGenerating(false);
     }
   };
 
@@ -76,13 +72,11 @@ export default function CreateWalletScreen() {
 
       setSelectedLanguageIndex(languageIdx);
       setMnemonic(normalizedMnemonic);
-      
-      // 生成种子
-      const password = mnemonicPassword?.trim() || '';
-      const seedBuffer = bip39.mnemonicToSeedSync(normalizedMnemonic, password);
-      setSeed(seedBuffer.toString('hex'));
+
+      // 不立即生成种子，只在保存时生成（像欧易、币安一样）
+      setSeed('');
       setInputMnemonic('');
-      
+
       Alert.alert('成功', '助记词验证成功！');
     } catch (error) {
       console.error('验证助记词失败:', error);
@@ -145,46 +139,35 @@ export default function CreateWalletScreen() {
       return;
     }
 
-    if (!mnemonic || !seed) {
+    if (!mnemonic) {
       Alert.alert('提示', '请先生成或导入助记词');
       return;
     }
 
-    if (!mnemonicPassword || mnemonicPassword.trim().length === 0) {
-      Alert.alert(
-        '提示',
-        '请设置钱包密码以保护您的助记词',
-        [
-          { text: '取消', style: 'cancel' },
-          {
-            text: '好的',
-            onPress: () => {
-              // 用户确认,继续保存
-              // 但这里需要密码,所以还是返回
-            }
-          }
-        ]
-      );
-      return;
-    }
-
     try {
-      setIsGenerating(true);
-      
+      // 在保存时才生成种子（像欧易、币安一样）
+      const password = mnemonicPassword?.trim() || '';
+      const seedBuffer = await bip39.mnemonicToSeed(mnemonic, password);
+      const seedHex = seedBuffer.toString('hex');
+
+
       const walletData = {
         name: walletName.trim(),
         mnemonic,
-        seed,
-        password: mnemonicPassword.trim(),
-        networkUrl: ''
+        seed: seedHex,
+        password: walletPassword?.trim() || '',
+        networkUrl: '',
       };
 
-      const result = await multiWalletStorage.saveWallet(walletData, mnemonicPassword.trim());
-      
+      const result = await multiWalletStorage.saveWallet(
+        walletData,
+        walletPassword?.trim() || ''
+      );
+
       if (result) {
         Alert.alert(
           '成功',
-          '钱包创建成功！请务必妥善保管您的助记词和密码。',
+          '钱包创建成功！请务必妥善保管您的助记词。',
           [
             {
               text: '确定',
@@ -198,8 +181,6 @@ export default function CreateWalletScreen() {
     } catch (error) {
       console.error('保存钱包失败:', error);
       Alert.alert('错误', '保存钱包失败');
-    } finally {
-      setIsGenerating(false);
     }
   };
 
@@ -292,12 +273,12 @@ export default function CreateWalletScreen() {
                 </View>
 
                 <View style={styles.formItem}>
-                    <Text style={styles.formLabel}>钱包密码 *</Text>
+                    <Text style={styles.formLabel}>钱包密码（可选）</Text>
                     <TextInput
                         style={styles.formInput}
-                        value={mnemonicPassword}
-                        onChangeText={setMnemonicPassword}
-                        placeholder="请输入钱包密码"
+                        value={walletPassword}
+                        onChangeText={setWalletPassword}
+                        placeholder="留空则不加密，或输入密码加密存储"
                         placeholderTextColor="#999"
                         secureTextEntry
                     />
@@ -309,7 +290,7 @@ export default function CreateWalletScreen() {
                         style={styles.formInput}
                         value={mnemonicPassword}
                         onChangeText={setMnemonicPassword}
-                        placeholder="留空或输入密码"
+                        placeholder="用于生成种子，留空则不使用密码"
                         placeholderTextColor="#999"
                         secureTextEntry
                     />
@@ -339,7 +320,14 @@ export default function CreateWalletScreen() {
                             <Text style={styles.copyButtonText}>复制</Text>
                         </TouchableOpacity>
                     </View>
-                    <Text style={styles.mnemonicText}>{mnemonic}</Text>
+                    <View style={styles.mnemonicGrid}>
+                        {mnemonic.split(' ').map((word, index) => (
+                            <View key={index} style={styles.mnemonicWordItem}>
+                                <Text style={styles.mnemonicWordIndex}>{(index + 1).toString().padStart(2, '0')}</Text>
+                                <Text style={styles.mnemonicWordText}>{word}</Text>
+                            </View>
+                        ))}
+                    </View>
                 </View>
 
                 {/* 种子显示 */}
@@ -358,18 +346,14 @@ export default function CreateWalletScreen() {
                     <TouchableOpacity
                         style={[styles.button, styles.hidden, hasInputMnemonic && !hasMnemonic && styles.visible]}
                         onPress={handleVerifyMnemonic}
-                        disabled={isGenerating}
                     >
                         <Text style={styles.buttonText}>验证并保存</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.button, styles.hidden, !hasInputMnemonic && !hasMnemonic && styles.visible]}
                         onPress={handleGenerateMnemonic}
-                        disabled={isGenerating}
                     >
-                        <Text style={styles.buttonText}>
-                            {isGenerating ? '生成中...' : '生成助记词'}
-                        </Text>
+                        <Text style={styles.buttonText}>生成助记词</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.button, styles.dangerButton, styles.hidden, hasMnemonic && styles.visible]}
@@ -388,11 +372,8 @@ export default function CreateWalletScreen() {
             <TouchableOpacity
                 style={styles.saveButton}
                 onPress={handleSaveWallet}
-                disabled={isGenerating}
             >
-                <Text style={styles.saveButtonText}>
-                    {isGenerating ? '保存中...' : '保存钱包'}
-                </Text>
+                <Text style={styles.saveButtonText}>保存钱包</Text>
             </TouchableOpacity>
         </View>
 
@@ -521,17 +502,37 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   mnemonicLabel: {
     fontSize: 14,
     fontWeight: '600',
   },
-  mnemonicText: {
+  mnemonicGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  mnemonicWordItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '31%',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e8e8e8',
+    borderRadius: 6,
+    padding: 8,
+  },
+  mnemonicWordIndex: {
+    fontSize: 12,
+    color: '#999999',
+    fontWeight: '600',
+    minWidth: 16,
+  },
+  mnemonicWordText: {
     fontSize: 13,
     color: '#333333',
-    textAlign: 'center',
-    lineHeight: 20,
+    fontWeight: '500',
   },
   seedDisplay: {
     backgroundColor: '#f0f0f0',
