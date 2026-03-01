@@ -6,9 +6,14 @@ import CryptoJS from 'crypto-js';
 // 注意：在真机上需要使用公网IP，不能使用 localhost 或局域网IP
 const API_BASE_URL = 'http://101.35.87.31:18333/bitcoin/chain';
 
+// 备用API地址(如果主地址不可用)
+const FALLBACK_API_URLS = [
+  'http://101.35.87.31:18333/bitcoin/chain',
+];
+
 // 配置 axios 超时时间
 const axiosInstance = axios.create({
-  timeout: 30000, // 30秒超时
+  timeout: 60000, // 60秒超时(真机网络可能较慢,增加到60秒)
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -93,12 +98,17 @@ export async function getAddressUTXO(address: string, status: number = 2): Promi
       return [];
     }
 
-    console.log('查询地址 UTXO:', address);
+    console.log('[真机调试] 开始查询地址 UTXO:', address);
+    console.log('[真机调试] 当前时间:', new Date().toISOString());
     const url = `${API_BASE_URL}/getAddressAllUTXO?address=${encodeURIComponent(address)}&status=${status}`;
-    console.log('请求 URL:', url);
+    console.log('[真机调试] 请求 URL:', url);
+    console.log('[真机调试] axios配置:', {
+      timeout: axiosInstance.defaults.timeout,
+      baseURL: API_BASE_URL,
+    });
 
     const response = await axiosInstance.get(url);
-    console.log('响应数据:', response.data);
+    console.log('[真机调试] 响应成功! 数据:', response.data);
 
     if (response.data && response.data.code === 200 && response.data.success === true) {
       return response.data.result || [];
@@ -107,14 +117,24 @@ export async function getAddressUTXO(address: string, status: number = 2): Promi
       return [];
     }
   } catch (error: any) {
-    console.error(`查询地址 ${address} 的 UTXO 失败:`, error);
+    console.error(`[真机调试] 查询地址 ${address} 的 UTXO 失败:`, error);
+    console.error('[真机调试] 错误详细信息:', {
+      message: error.message,
+      code: error.code,
+      config: error.config?.url,
+      timeout: error.code === 'ECONNABORTED' ? '超时' : '否',
+    });
+
     if (error.response) {
-      console.error('响应状态:', error.response.status);
-      console.error('响应数据:', error.response.data);
+      console.error('[真机调试] 服务器响应状态:', error.response.status);
+      console.error('[真机调试] 响应数据:', error.response.data);
     } else if (error.request) {
-      console.error('请求已发送但没有收到响应，可能是网络问题:', error.message);
+      console.error('[真机调试] 请求已发送但没有收到响应，可能是网络问题:');
+      console.error('  - 错误码:', error.code);
+      console.error('  - 错误消息:', error.message);
+      console.error('  - 可能原因: 服务器不可达、网络被限制、防火墙阻止');
     } else {
-      console.error('请求配置错误:', error.message);
+      console.error('[真机调试] 请求配置错误:', error.message);
     }
     return [];
   }
