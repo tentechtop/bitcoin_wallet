@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { statusBarHeight } from '@/constants/theme';
 import { multiWalletStorage, WalletAddress } from '@/utils/secureStorage';
-import { Transaction, getTxListByAddress, calculateScriptPubKey } from '@/utils/blockchainApi';
+import { Transaction, getTxListByAddress, calculateScriptPubKey, getTxListByAddressInTxPool, formatTransactionList } from '@/utils/blockchainApi';
 
 export default function TransactionsScreen() {
   const router = useRouter();
@@ -41,9 +41,12 @@ export default function TransactionsScreen() {
         typeof addr === 'string' ? addr : addr.address
       );
 
-      // 并发查询所有地址的交易历史
+      // 存储所有交易
       const allTransactions: Transaction[] = [];
+      const pendingTxIds = new Set<string>(); // 用于去重，避免交易池和交易历史中重复
 
+      // 第一步：查询所有地址的交易池（进行中的交易）
+      console.log('===== 开始查询交易池（进行中的交易）=====');
       for (const address of addresses) {
         try {
           if (!address || typeof address !== 'string') {
@@ -51,13 +54,54 @@ export default function TransactionsScreen() {
             continue;
           }
 
-          const txList = await getTxListByAddress(address, 100, '');
           const myScriptPubKey = calculateScriptPubKey(address);
+          console.log(`查询地址 ${address} 的交易池...`);
+
+          const txPoolData = await getTxListByAddressInTxPool(address);
+          console.log(`地址 ${address} 的交易池查询结果:`, txPoolData);
+
+          if (txPoolData && txPoolData.length > 0) {
+            // 使用 formatTransactionList 格式化交易池数据
+            const formattedTxs = formatTransactionList(txPoolData, myScriptPubKey);
+            formattedTxs.forEach(tx => {
+              // 记录待确认交易ID，避免重复
+              if (tx.txId) {
+                pendingTxIds.add(tx.txId);
+              }
+            });
+            allTransactions.push(...formattedTxs);
+            console.log(`地址 ${address} 添加了 ${formattedTxs.length} 条待确认交易`);
+          }
+        } catch (error: any) {
+          console.error(`查询地址 ${address} 的交易池失败:`, error?.message || error);
+        }
+      }
+
+      // 第二步：查询所有地址的交易历史（已完成的交易）
+      console.log('===== 开始查询交易历史（已完成的交易）=====');
+      for (const address of addresses) {
+        try {
+          if (!address || typeof address !== 'string') {
+            console.warn('跳过无效地址:', address);
+            continue;
+          }
+
+          const myScriptPubKey = calculateScriptPubKey(address);
+          console.log(`查询地址 ${address} 的交易历史...`);
+
+          const txList = await getTxListByAddress(address, 100, '');
+          console.log(`地址 ${address} 的交易历史查询结果:`, txList);
 
           // 格式化交易数据
           if (txList && txList.length > 0) {
             const formattedTxs = txList.map((tx: any, index: number) => {
               try {
+                // 跳过已经在交易池中的交易（避免重复）
+                if (tx.txId && pendingTxIds.has(tx.txId)) {
+                  console.log(`跳过已存在于交易池的交易: ${tx.txId}`);
+                  return null;
+                }
+
                 // 简化处理，根据交易数据判断类型
                 const isReceive = tx.outputs?.some((output: any) =>
                   output.scriptPubKey === myScriptPubKey
@@ -105,17 +149,26 @@ export default function TransactionsScreen() {
             }).filter((tx): tx is Transaction => tx !== null);
 
             allTransactions.push(...formattedTxs);
+            console.log(`地址 ${address} 添加了 ${formattedTxs.length} 条历史交易`);
           }
         } catch (error: any) {
-          console.error(`查询地址 ${address} 的交易失败:`, error?.message || error);
+          console.error(`查询地址 ${address} 的交易历史失败:`, error?.message || error);
         }
       }
 
-      // 按时间倒序排列
+      // 按时间倒序排列（进行中的交易排在前面）
       allTransactions.sort((a, b) => {
+        // 先按状态排序：pending 排前面，completed 排后面
+        if (a.status === 'pending' && b.status === 'completed') {
+          return -1;
+        } else if (a.status === 'completed' && b.status === 'pending') {
+          return 1;
+        }
+        // 相同状态按时间排序
         return new Date(b.time).getTime() - new Date(a.time).getTime();
       });
 
+      console.log(`===== 加载完成，共 ${allTransactions.length} 条交易 =====`);
       setTransactions(allTransactions);
     } catch (error: any) {
       console.error('加载交易历史失败:', error?.message || error);

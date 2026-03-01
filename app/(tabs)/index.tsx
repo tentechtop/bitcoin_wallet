@@ -43,15 +43,15 @@ export default function HomeScreen() {
 
   const [sendData, setSendData] = useState({
     coinIndex: 0,
-    accountIndex: '0',
-    addressIndex: '0',
     toAddress: '',
     amount: '',
     fee: '',
     amountUnitIndex: 0,
     feeUnitIndex: 0,
+    selectedAddressIndex: -1, // -1 表示自动选择，>=0 表示手动选择的地址索引
     senderAddress: '',
     senderBalance: '0.00 BTC',
+    addressList: [] as (string | WalletAddress)[],
   });
 
 
@@ -171,20 +171,46 @@ export default function HomeScreen() {
     }
   };
 
-  const handleSendPress = () => {
-    setShowSendModal(true);
-    Animated.parallel([
-      Animated.timing(sendOverlayAnim, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(sendSlideAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
+  const handleSendPress = async () => {
+    try {
+      const walletId = await multiWalletStorage.getActiveWalletId();
+      if (!walletId) {
+        Alert.alert('提示', '请先创建或选择钱包');
+        return;
+      }
+      const wallet = await multiWalletStorage.getWalletById(walletId);
+
+      if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
+        Alert.alert('提示', '钱包中没有地址，请先生成地址');
+        return;
+      }
+
+      // 初始化发送数据，加载钱包地址列表
+      setSendData(prev => ({
+        ...prev,
+        addressList: wallet.addresses,
+        selectedAddressIndex: -1,
+        senderAddress: '',
+        senderBalance: '0.00 BTC',
+      }));
+
+      setShowSendModal(true);
+      Animated.parallel([
+        Animated.timing(sendOverlayAnim, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+        Animated.timing(sendSlideAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } catch (error) {
+      console.error('加载钱包地址失败:', error);
+      Alert.alert('错误', '加载钱包地址失败');
+    }
   };
 
   const handleReceivePress = async () => {
@@ -251,15 +277,15 @@ export default function HomeScreen() {
     });
     setSendData({
       coinIndex: 0,
-      accountIndex: '0',
-      addressIndex: '0',
       toAddress: '',
       amount: '',
       fee: '',
       amountUnitIndex: 0,
       feeUnitIndex: 0,
+      selectedAddressIndex: -1,
       senderAddress: '',
       senderBalance: '0.00 BTC',
+      addressList: [],
     });
   };
 
@@ -396,16 +422,31 @@ export default function HomeScreen() {
         return;
       }
 
-      // 2. 派生密钥和地址
-      const accountIdx = parseInt(sendData.accountIndex) || 0;
-      const addressIdx = parseInt(sendData.addressIndex) || 0;
-      const path = `m/44'/0'/${accountIdx}'/0/${addressIdx}`;
+      // 2. 确定使用的地址
+      let selectedAddress: string | WalletAddress;
+      let addressIndex: number;
 
-      console.log('钱包ID:', walletId);
-      console.log('派生路径:', path);
+      if (sendData.selectedAddressIndex >= 0) {
+        // 用户手动选择了地址
+        selectedAddress = wallet.addresses[sendData.selectedAddressIndex];
+        addressIndex = sendData.selectedAddressIndex;
+        console.log('用户手动选择地址索引:', addressIndex);
+      } else {
+        // 自动选择：从第一个地址开始
+        selectedAddress = wallet.addresses[0];
+        addressIndex = 0;
+        console.log('自动选择第一个地址索引:', addressIndex);
+      }
 
+      const addressStr = typeof selectedAddress === 'string' ? selectedAddress : selectedAddress.address;
+      const pathStr = typeof selectedAddress === 'string' ? '' : selectedAddress.path;
+
+      console.log('使用的地址:', addressStr);
+      console.log('派生路径:', pathStr);
+
+      // 3. 派生密钥
       // 使用空密码或固定密码解密种子
-      const password = ''; // 或者使用一个固定的密码
+      const password = '';
       console.log('使用密码解密种子...');
 
       const decryptedSeed = multiWalletStorage.decryptSeed(wallet.encryptedSeed, password);
@@ -418,7 +459,7 @@ export default function HomeScreen() {
 
       const seedBuffer = Buffer.from(decryptedSeed, 'hex');
       const hdkey = HDKey.fromMasterSeed(seedBuffer);
-      const derivedKey = hdkey.derive(path);
+      const derivedKey = hdkey.derive(pathStr || `m/44'/0'/0'/0/0`);
       const privateKeyBytes = derivedKey.privateKey;
 
       if (!privateKeyBytes || privateKeyBytes.length !== 32) {
@@ -435,7 +476,7 @@ export default function HomeScreen() {
       console.log('公钥长度:', publicKeyBytes.length);
       console.log('私钥长度:', secretKeyBytes.length);
 
-      // 3. 查询UTXO
+      // 4. 查询UTXO
       console.log('开始查询UTXO...');
       const utxoList = await queryUTXOByAddress(senderAddress);
 
@@ -1066,39 +1107,68 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              {/* 账户索引 */}
-              <View style={styles.formItem}>
-                <ThemedText style={styles.formLabel}>账户索引</ThemedText>
-                <TextInput
-                  style={styles.formInput}
-                  value={sendData.accountIndex}
-                  onChangeText={(text) => setSendData({ ...sendData, accountIndex: text })}
-                  placeholder="0"
-                  keyboardType="numeric"
-                />
-              </View>
-
-              {/* 地址索引(仅比特币显示) */}
-              {coinList[sendData.coinIndex].id === 'btc' && (
-                <View style={styles.formItem}>
-                  <ThemedText style={styles.formLabel}>地址索引</ThemedText>
-                  <TextInput
-                    style={styles.formInput}
-                    value={sendData.addressIndex}
-                    onChangeText={(text) => setSendData({ ...sendData, addressIndex: text })}
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-                </View>
-              )}
-
-              {/* 发送方地址 */}
-              {sendData.senderAddress ? (
+              {/* 发送方地址选择 */}
+              {coinList[sendData.coinIndex].id === 'btc' && sendData.addressList.length > 0 && (
                 <View style={styles.formItem}>
                   <ThemedText style={styles.formLabel}>发送方地址</ThemedText>
-                  <ThemedText style={styles.resultValueSmall}>{sendData.senderAddress}</ThemedText>
+                  <ScrollView style={styles.addressList} nestedScrollEnabled>
+                    {/* 自动选择选项 */}
+                    <TouchableOpacity
+                      style={[
+                        styles.addressItem,
+                        sendData.selectedAddressIndex === -1 && styles.addressItemSelected
+                      ]}
+                      onPress={() => {
+                        setSendData({
+                          ...sendData,
+                          selectedAddressIndex: -1,
+                          senderAddress: '',
+                          senderBalance: '0.00 BTC',
+                        });
+                      }}
+                    >
+                      <View style={styles.addressItemContent}>
+                        <ThemedText style={styles.addressIndex}>自动选择</ThemedText>
+                        <ThemedText style={styles.addressText}>系统自动选择地址</ThemedText>
+                      </View>
+                      {sendData.selectedAddressIndex === -1 && (
+                        <Ionicons name="checkmark-circle" size={20} color="#000000" />
+                      )}
+                    </TouchableOpacity>
+
+                    {/* 地址列表 */}
+                    {sendData.addressList.map((addr, index) => {
+                      const addressStr = typeof addr === 'string' ? addr : addr.address;
+                      const isSelected = index === sendData.selectedAddressIndex;
+                      return (
+                        <TouchableOpacity
+                          key={index}
+                          style={[
+                            styles.addressItem,
+                            isSelected && styles.addressItemSelected
+                          ]}
+                          onPress={() => {
+                            setSendData({
+                              ...sendData,
+                              selectedAddressIndex: index,
+                              senderAddress: addressStr,
+                              senderBalance: '0.00 BTC',
+                            });
+                          }}
+                        >
+                          <View style={styles.addressItemContent}>
+                            <ThemedText style={styles.addressIndex}>地址 {index + 1}</ThemedText>
+                            <ThemedText style={styles.addressText}>{addressStr}</ThemedText>
+                          </View>
+                          {isSelected && (
+                            <Ionicons name="checkmark-circle" size={20} color="#000000" />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
                 </View>
-              ) : null}
+              )}
 
               {/* 接收地址 */}
               <View style={styles.formItem}>

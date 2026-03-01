@@ -13,6 +13,8 @@ npx expo prebuild --platform android
 
 cd android
 
+npx expo prebuild --clean
+
 .\gradlew.bat --stop
 
 .\gradlew.bat clean
@@ -47,3 +49,10 @@ npx expo run:android
 本地打包 需要将local.properties 文件放再Android目录下
 
 adb -s 11785d69 install F:\workSpace2026\blockchain\bitcoin-wallet\android\app\build\outputs\apk\release\app-release.apk
+
+完成!我已经在 app.json 中添加了 "usesCleartextTraffic": true 配置。
+
+"android": {
+  ...
+  "usesCleartextTraffic": true  // 允许HTTP明文流量
+}
