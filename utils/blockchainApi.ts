@@ -358,11 +358,11 @@ export async function getTxListByAddress(
   address: string,
   pageSize: number = 100,
   lastKey: string = ''
-): Promise<any[]> {
+): Promise<{ data: any[]; lastKey: string; lastPage: boolean }> {
   try {
     if (!address || typeof address !== 'string') {
       console.error('无效的地址格式:', address);
-      return [];
+      return { data: [], lastKey: '', lastPage: true };
     }
 
     console.log('查询交易历史 - 地址:', address, 'pageSize:', pageSize, 'lastKey:', lastKey);
@@ -375,22 +375,30 @@ export async function getTxListByAddress(
       // 处理 result 为 null 的情况（无交易）
       if (!response.data.result) {
         console.log('该地址暂无交易记录');
-        return [];
+        return { data: [], lastKey: '', lastPage: true };
       }
 
-      // 处理 result.data 包含交易数组的情况
+      // 处理标准返回格式 { data: [], lastKey: '', lastPage: false }
       if (response.data.result.data && Array.isArray(response.data.result.data)) {
-        return response.data.result.data;
+        return {
+          data: response.data.result.data,
+          lastKey: response.data.result.lastKey || '',
+          lastPage: response.data.result.lastPage || false
+        };
       }
 
       // 处理 result 直接是数组的情况（兼容性处理）
       if (Array.isArray(response.data.result)) {
-        return response.data.result;
+        return {
+          data: response.data.result,
+          lastKey: '',
+          lastPage: true
+        };
       }
     }
 
     console.error('查询交易历史失败:', response.data?.message || '未知错误');
-    return [];
+    return { data: [], lastKey: '', lastPage: true };
   } catch (error: any) {
     const errorMessage = error?.response?.data?.message || error?.message || '未知错误';
     console.error(`查询地址 ${address} 的交易历史失败:`, errorMessage);
@@ -402,7 +410,7 @@ export async function getTxListByAddress(
     } else {
       console.error('请求配置错误:', error.message);
     }
-    return [];
+    return { data: [], lastKey: '', lastPage: true };
   }
 }
 

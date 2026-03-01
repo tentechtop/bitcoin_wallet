@@ -4,9 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="完善交易发送">
+    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="完善打包">
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/真机网络调试指南.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/(tabs)/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(tabs)/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/transactions.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/transactions.tsx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -196,7 +198,7 @@
       <option name="presentableId" value="Default" />
       <updated>1772350538562</updated>
       <workItem from="1772350540642" duration="114000" />
-      <workItem from="1772350666152" duration="1539000" />
+      <workItem from="1772350666152" duration="3618000" />
     </task>
     <task id="LOCAL-00014" summary="完善交易发送">
       <option name="closed" value="true" />
@@ -206,7 +208,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772352123026</updated>
     </task>
-    <option name="localTasksCounter" value="15" />
+    <task id="LOCAL-00015" summary="完善打包">
+      <option name="closed" value="true" />
+      <created>1772352471980</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1772352471980</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -238,7 +248,8 @@
     <MESSAGE value="增加钱包余额查询" />
     <MESSAGE value="完善交易历史" />
     <MESSAGE value="完善交易发送" />
-    <option name="LAST_COMMIT_MESSAGE" value="完善交易发送" />
+    <MESSAGE value="完善打包" />
+    <option name="LAST_COMMIT_MESSAGE" value="完善打包" />
     <option name="NON_MODAL_COMMIT_POSTPONE_SLOW_CHECKS" value="false" />
   </component>
 </project>

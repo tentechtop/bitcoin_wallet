@@ -1,32 +1,41 @@
-import { StyleSheet, View, Text, TouchableOpacity, TextInput, ScrollView, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, TextInput, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { statusBarHeight } from '@/constants/theme';
 import { multiWalletStorage, WalletAddress } from '@/utils/secureStorage';
 import { Transaction, getTxListByAddress, calculateScriptPubKey, getTxListByAddressInTxPool, formatTransactionList } from '@/utils/blockchainApi';
+import axios from 'axios';
 
 export default function TransactionsScreen() {
   const router = useRouter();
+  const { height: windowHeight } = useWindowDimensions();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'receive' | 'send' | 'pending'>('all');
   const [loading, setLoading] = useState(false);
+  const [searchResult, setSearchResult] = useState<Transaction | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(15);
+  const [hasMore, setHasMore] = useState(false);
+  const [lastKeys, setLastKeys] = useState<Record<string, string>>({}); // 存储每个地址的lastKey
 
   useFocusEffect(
     useCallback(() => {
+      setCurrentPage(1);
+      setLastKeys({});
       loadTransactions();
     }, [])
   );
 
+  // 当页码变化时重新加载
   useEffect(() => {
-    applyFilters();
-  }, [transactions, searchKeyword, activeFilter]);
+    loadTransactions();
+  }, [currentPage]);
 
   const loadTransactions = async () => {
     try {
       setLoading(true);
+      setSearchResult(null);
 
       // 获取当前钱包
       const wallet = await multiWalletStorage.getActiveWallet();
@@ -44,6 +53,8 @@ export default function TransactionsScreen() {
       // 存储所有交易
       const allTransactions: Transaction[] = [];
       const pendingTxIds = new Set<string>(); // 用于去重，避免交易池和交易历史中重复
+      const newLastKeys: Record<string, string> = { ...lastKeys };
+      let allLastPage = true;
 
       // 第一步：查询所有地址的交易池（进行中的交易）
       console.log('===== 开始查询交易池（进行中的交易）=====');
@@ -77,8 +88,10 @@ export default function TransactionsScreen() {
         }
       }
 
-      // 第二步：查询所有地址的交易历史（已完成的交易）
+      // 第二步：查询所有地址的交易历史（已完成的交易）- 真正的服务端分页
       console.log('===== 开始查询交易历史（已完成的交易）=====');
+      console.log(`当前页: ${currentPage}, 每页数量: ${pageSize}`);
+
       for (const address of addresses) {
         try {
           if (!address || typeof address !== 'string') {
@@ -89,12 +102,26 @@ export default function TransactionsScreen() {
           const myScriptPubKey = calculateScriptPubKey(address);
           console.log(`查询地址 ${address} 的交易历史...`);
 
-          const txList = await getTxListByAddress(address, 100, '');
-          console.log(`地址 ${address} 的交易历史查询结果:`, txList);
+          // 使用对应地址的 lastKey
+          const currentLastKey = lastKeys[address] || '';
+          console.log(`使用 lastKey: ${currentLastKey || '(空)'}`);
+
+          const result = await getTxListByAddress(address, pageSize, currentLastKey);
+          console.log(`地址 ${address} 的交易历史查询结果:`, result);
+
+          // 更新 lastKey（如果不是最后一页）
+          if (!result.lastPage && result.lastKey) {
+            newLastKeys[address] = result.lastKey;
+          }
+
+          // 检查是否所有地址都是最后一页
+          if (!result.lastPage) {
+            allLastPage = false;
+          }
 
           // 格式化交易数据
-          if (txList && txList.length > 0) {
-            const formattedTxs = txList.map((tx: any, index: number) => {
+          if (result.data && result.data.length > 0) {
+            const formattedTxs = result.data.map((tx: any, index: number) => {
               try {
                 // 跳过已经在交易池中的交易（避免重复）
                 if (tx.txId && pendingTxIds.has(tx.txId)) {
@@ -156,6 +183,9 @@ export default function TransactionsScreen() {
         }
       }
 
+      // 更新 lastKeys 状态
+      setLastKeys(newLastKeys);
+
       // 按时间倒序排列（进行中的交易排在前面）
       allTransactions.sort((a, b) => {
         // 先按状态排序：pending 排前面，completed 排后面
@@ -170,6 +200,7 @@ export default function TransactionsScreen() {
 
       console.log(`===== 加载完成，共 ${allTransactions.length} 条交易 =====`);
       setTransactions(allTransactions);
+      setHasMore(!allLastPage);
     } catch (error: any) {
       console.error('加载交易历史失败:', error?.message || error);
       setTransactions([]);
@@ -178,44 +209,120 @@ export default function TransactionsScreen() {
     }
   };
 
+  // 通过交易ID搜索交易
+  const searchByTxId = async (txId: string) => {
+    if (!txId || txId.trim() === '') {
+      setSearchResult(null);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const url = `http://101.35.87.31:3000/transaction/${txId.trim()}`;
+      console.log('搜索交易:', url);
+
+      const response = await axios.get(url, {
+        timeout: 60000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      });
+
+      console.log('搜索结果:', response.data);
+
+      if (response.data && response.data.success === true && response.data.result) {
+        const txData = response.data.result;
+
+        // 获取当前钱包地址用于判断交易类型
+        const wallet = await multiWalletStorage.getActiveWallet();
+        const myAddresses = wallet?.addresses?.map((addr: string | WalletAddress) =>
+          typeof addr === 'string' ? addr : addr.address
+        ) || [];
+
+        // 计算交易类型
+        let isReceive = false;
+        let myScriptPubKey = '';
+        let matchedAddress = '';
+
+        for (const address of myAddresses) {
+          if (typeof address === 'string') {
+            myScriptPubKey = calculateScriptPubKey(address);
+            if (txData.outputs?.some((output: any) => output.scriptPubKey === myScriptPubKey)) {
+              isReceive = true;
+              matchedAddress = address;
+              break;
+            }
+          }
+        }
+
+        const type = isReceive ? 'receive' : 'send';
+        const icon = isReceive ? 'arrow-down' : 'arrow-up';
+
+        // 计算金额
+        let amount = 0;
+        if (isReceive) {
+          amount = txData.outputs
+            ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
+            ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
+        } else {
+          const totalInput = txData.inputs?.reduce((sum: number, input: any) =>
+            sum + (input.output?.value || 0), 0) || 0;
+          const changeAmount = txData.outputs
+            ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
+            ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
+          amount = totalInput - changeAmount;
+        }
+
+        const txTime = txData.time ? new Date(txData.time).toLocaleString() : new Date().toLocaleString();
+
+        const transaction: Transaction = {
+          id: txData.txId || `search_${Date.now()}`,
+          txId: txData.txId || '',
+          title: isReceive ? '接收BTC' : '发送BTC',
+          time: txTime,
+          amount: `${isReceive ? '+' : '-'} ${(amount / 100000000).toFixed(8)} BTC`,
+          type,
+          icon,
+          status: 'completed',
+          statusText: '已完成',
+          rawData: txData,
+        };
+
+        setSearchResult(transaction);
+      } else {
+        console.log('未找到交易');
+        setSearchResult(null);
+        alert('未找到该交易ID');
+      }
+    } catch (error: any) {
+      console.error('搜索交易失败:', error?.message || error);
+      setSearchResult(null);
+      alert('搜索失败: ' + (error?.response?.data?.message || error?.message || '未知错误'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSearch = (text: string) => {
     setSearchKeyword(text);
+    if (text.trim() !== '') {
+      searchByTxId(text);
+    } else {
+      setSearchResult(null);
+    }
   };
 
   const clearSearch = () => {
     setSearchKeyword('');
+    setSearchResult(null);
   };
 
-  const setFilter = (filter: 'all' | 'receive' | 'send' | 'pending') => {
-    setActiveFilter(filter);
-  };
-
-  const applyFilters = () => {
-    let result = [...transactions];
-
-    // 应用搜索过滤
-    if (searchKeyword) {
-      const keyword = searchKeyword.toLowerCase();
-      result = result.filter(tx => {
-        return (
-          tx.txId.toLowerCase().includes(keyword) ||
-          tx.title.toLowerCase().includes(keyword) ||
-          tx.amount.toLowerCase().includes(keyword)
-        );
-      });
-    }
-
-    // 应用类型过滤
-    if (activeFilter !== 'all') {
-      if (activeFilter === 'pending') {
-        result = result.filter(tx => tx.status === 'pending');
-      } else {
-        result = result.filter(tx => tx.type === activeFilter);
-      }
-    }
-
-    setFilteredTransactions(result);
-  };
+  // 分页计算
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const displayedTransactions = transactions.slice(startIndex, endIndex);
+  const totalPages = Math.ceil(transactions.length / pageSize);
 
   const goToTxDetail = (tx: Transaction) => {
     const txDataEncoded = encodeURIComponent(JSON.stringify(tx));
@@ -259,46 +366,56 @@ export default function TransactionsScreen() {
         </View>
       </View>
 
-      {/* 筛选标签 */}
-      <View style={styles.filterSection}>
-        <View style={styles.filterTabs}>
-          <TouchableOpacity
-            style={[styles.filterTab, activeFilter === 'all' && styles.filterTabActive]}
-            onPress={() => setFilter('all')}
-          >
-            <Text style={[styles.filterTabText, activeFilter === 'all' && styles.filterTabTextActive]}>全部</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterTab, activeFilter === 'receive' && styles.filterTabActive]}
-            onPress={() => setFilter('receive')}
-          >
-            <Text style={[styles.filterTabText, activeFilter === 'receive' && styles.filterTabTextActive]}>接收</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterTab, activeFilter === 'send' && styles.filterTabActive]}
-            onPress={() => setFilter('send')}
-          >
-            <Text style={[styles.filterTabText, activeFilter === 'send' && styles.filterTabTextActive]}>发送</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterTab, activeFilter === 'pending' && styles.filterTabActive]}
-            onPress={() => setFilter('pending')}
-          >
-            <Text style={[styles.filterTabText, activeFilter === 'pending' && styles.filterTabTextActive]}>进行中</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
       {/* 交易列表 */}
-      <ScrollView style={styles.mainContent}>
+      <ScrollView style={styles.mainContent} contentContainerStyle={styles.scrollContent}>
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#000000" />
             <Text style={styles.loadingText}>加载中...</Text>
           </View>
-        ) : filteredTransactions.length > 0 ? (
+        ) : searchResult ? (
+          // 显示搜索结果
           <View style={styles.transactionList}>
-            {filteredTransactions.map((tx) => (
+            <TouchableOpacity
+              key={searchResult.id}
+              style={styles.transactionItem}
+              onPress={() => goToTxDetail(searchResult)}
+            >
+              <View style={styles.transactionLeft}>
+                <View style={[
+                  styles.transactionIcon,
+                  searchResult.type === 'receive' ? styles.transactionIconReceive :
+                  searchResult.type === 'send' ? styles.transactionIconSend : {}
+                ]}>
+                  <Ionicons
+                    name={searchResult.icon === 'arrow-up' ? 'arrow-up' : 'arrow-down'}
+                    size={16}
+                    color="#ffffff"
+                  />
+                </View>
+                <View style={styles.transactionDetails}>
+                  <Text style={styles.transactionTitle}>{searchResult.title}</Text>
+                  <Text style={styles.transactionTime}>{searchResult.time}</Text>
+                </View>
+              </View>
+              <View style={styles.transactionRight}>
+                <Text style={[
+                  styles.amount,
+                  searchResult.type === 'receive' ? styles.amountPositive : styles.amountNegative
+                ]}>
+                  {searchResult.amount}
+                </Text>
+                <View style={[styles.status, getStatusStyle(searchResult.status)]}>
+                  <Text style={styles.statusText}>{searchResult.statusText}</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </View>
+        ) : transactions.length > 0 ? (
+          // 显示全部交易（分页）
+          <>
+            <View style={styles.transactionList}>
+              {displayedTransactions.map((tx) => (
               <TouchableOpacity
                 key={tx.id}
                 style={styles.transactionItem}
@@ -334,12 +451,54 @@ export default function TransactionsScreen() {
                 </View>
               </TouchableOpacity>
             ))}
-          </View>
+            </View>
+
+            {/* 分页控件 */}
+            {totalPages > 1 && (
+              <View style={styles.pagination}>
+                <TouchableOpacity
+                  style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
+                  onPress={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                >
+                  <Text style={[styles.pageButtonText, currentPage === 1 && styles.pageButtonTextDisabled]}>首页</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
+                  onPress={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <Ionicons name="chevron-back" size={18} color={currentPage === 1 ? '#cccccc' : '#000000'} />
+                </TouchableOpacity>
+
+                <Text style={styles.pageInfo}>
+                  {currentPage} / {totalPages}
+                </Text>
+
+                <TouchableOpacity
+                  style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
+                  onPress={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  <Ionicons name="chevron-forward" size={18} color={currentPage === totalPages ? '#cccccc' : '#000000'} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
+                  onPress={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                >
+                  <Text style={[styles.pageButtonText, currentPage === totalPages && styles.pageButtonTextDisabled]}>末页</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
         ) : (
           <View style={styles.emptyState}>
             <Ionicons name="wallet-outline" size={60} color="#cccccc" />
-            <Text style={styles.emptyText}>暂无交易记录</Text>
-            <Text style={styles.emptyHint}>开始发送或接收比特币吧</Text>
+            <Text style={styles.emptyText}>{searchKeyword ? '未找到该交易' : '暂无交易记录'}</Text>
+            <Text style={styles.emptyHint}>{searchKeyword ? '请检查交易ID是否正确' : '开始发送或接收比特币吧'}</Text>
           </View>
         )}
       </ScrollView>
@@ -426,37 +585,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  filterSection: {
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e8e8e8',
-    alignItems: 'center',
-  },
-  filterTabs: {
-    flexDirection: 'row',
-    gap: 20,
-  },
-  filterTab: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  filterTabActive: {
-    backgroundColor: '#000000',
-  },
-  filterTabText: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  filterTabTextActive: {
-    color: '#ffffff',
-    fontWeight: '500',
-  },
   mainContent: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: 16,
+  },
+  scrollContent: {
+    paddingBottom: 100,
   },
   transactionList: {
     backgroundColor: '#ffffff',
@@ -553,5 +687,47 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#999999',
     marginTop: 8,
+  },
+  pagination: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    gap: 8,
+  },
+  pageButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e8e8e8',
+    minWidth: 40,
+    minHeight: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pageButtonDisabled: {
+    opacity: 0.4,
+  },
+  pageButtonText: {
+    fontSize: 12,
+    color: '#000000',
+    fontWeight: '500',
+  },
+  pageButtonTextDisabled: {
+    color: '#999999',
+  },
+  pageInfo: {
+    fontSize: 14,
+    color: '#666666',
+    marginHorizontal: 8,
+    minWidth: 60,
+    textAlign: 'center',
   },
 });
