@@ -4,13 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="增加钱包余额查询">
-      <change afterPath="$PROJECT_DIR$/app/tx-detail.tsx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/utils/blockchainApi.ts" afterDir="false" />
+    <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="完善交易历史">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/(tabs)/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(tabs)/index.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/_layout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/_layout.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/transactions.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/transactions.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/blockchainApi.ts" beforeDir="false" afterPath="$PROJECT_DIR$/utils/blockchainApi.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -137,7 +137,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772267522923</updated>
     </task>
-    <option name="localTasksCounter" value="12" />
+    <task id="LOCAL-00012" summary="完善交易历史">
+      <option name="closed" value="true" />
+      <created>1772272483670</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1772272483670</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -164,7 +172,8 @@
     <MESSAGE value="删除地址生成" />
     <MESSAGE value="完善钱包" />
     <MESSAGE value="增加钱包余额查询" />
-    <option name="LAST_COMMIT_MESSAGE" value="增加钱包余额查询" />
+    <MESSAGE value="完善交易历史" />
+    <option name="LAST_COMMIT_MESSAGE" value="完善交易历史" />
     <option name="NON_MODAL_COMMIT_POSTPONE_SLOW_CHECKS" value="false" />
   </component>
 </project>

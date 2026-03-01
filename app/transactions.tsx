@@ -46,55 +46,68 @@ export default function TransactionsScreen() {
 
       for (const address of addresses) {
         try {
+          if (!address || typeof address !== 'string') {
+            console.warn('跳过无效地址:', address);
+            continue;
+          }
+
           const txList = await getTxListByAddress(address, 100, '');
           const myScriptPubKey = calculateScriptPubKey(address);
 
           // 格式化交易数据
           if (txList && txList.length > 0) {
             const formattedTxs = txList.map((tx: any, index: number) => {
-              // 简化处理，根据交易数据判断类型
-              const isReceive = tx.outputs?.some((output: any) =>
-                output.scriptPubKey === myScriptPubKey
-              );
+              try {
+                // 简化处理，根据交易数据判断类型
+                const isReceive = tx.outputs?.some((output: any) =>
+                  output.scriptPubKey === myScriptPubKey
+                );
 
-              const type = isReceive ? 'receive' : 'send';
-              const icon = isReceive ? 'arrow-down' : 'arrow-up';
+                const type = isReceive ? 'receive' : 'send';
+                const icon = isReceive ? 'arrow-down' : 'arrow-up';
 
-              // 计算金额
-              let amount = 0;
-              if (isReceive) {
-                // 计算接收金额
-                amount = tx.outputs
-                  ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
-                  ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
-              } else {
-                // 计算发送金额（总输入 - 找零）
-                const totalInput = tx.inputs?.reduce((sum: number, input: any) =>
-                  sum + (input.output?.value || 0), 0) || 0;
-                const changeAmount = tx.outputs
-                  ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
-                  ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
-                amount = totalInput - changeAmount;
+                // 计算金额
+                let amount = 0;
+                if (isReceive) {
+                  // 计算接收金额
+                  amount = tx.outputs
+                    ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
+                    ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
+                } else {
+                  // 计算发送金额（总输入 - 找零）
+                  const totalInput = tx.inputs?.reduce((sum: number, input: any) =>
+                    sum + (input.output?.value || 0), 0) || 0;
+                  const changeAmount = tx.outputs
+                    ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
+                    ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
+                  amount = totalInput - changeAmount;
+                }
+
+                // 处理交易时间 - API 返回的数据中没有 time 字段，使用当前时间
+                const txTime = tx.time ? new Date(tx.time).toLocaleString() : new Date().toLocaleString();
+
+                return {
+                  id: tx.txId || `tx_${Date.now()}_${index}`,
+                  txId: tx.txId || '',
+                  title: isReceive ? '接收BTC' : '发送BTC',
+                  time: txTime,
+                  amount: `${isReceive ? '+' : '-'} ${(amount / 100000000).toFixed(8)} BTC`,
+                  type,
+                  icon,
+                  status: 'completed',
+                  statusText: '已完成',
+                  rawData: tx,
+                } as Transaction;
+              } catch (formatError) {
+                console.error('格式化交易失败:', formatError);
+                return null;
               }
-
-              return {
-                id: tx.txId || `tx_${Date.now()}_${index}`,
-                txId: tx.txId || '',
-                title: isReceive ? '接收BTC' : '发送BTC',
-                time: tx.time ? new Date(tx.time).toLocaleString() : new Date().toLocaleString(),
-                amount: `${isReceive ? '+' : '-'} ${(amount / 100000000).toFixed(8)} BTC`,
-                type,
-                icon,
-                status: 'completed',
-                statusText: '已完成',
-                rawData: tx,
-              };
-            });
+            }).filter((tx): tx is Transaction => tx !== null);
 
             allTransactions.push(...formattedTxs);
           }
-        } catch (error) {
-          console.error(`查询地址 ${address} 的交易失败:`, error);
+        } catch (error: any) {
+          console.error(`查询地址 ${address} 的交易失败:`, error?.message || error);
         }
       }
 
@@ -104,8 +117,9 @@ export default function TransactionsScreen() {
       });
 
       setTransactions(allTransactions);
-    } catch (error) {
-      console.error('加载交易历史失败:', error);
+    } catch (error: any) {
+      console.error('加载交易历史失败:', error?.message || error);
+      setTransactions([]);
     } finally {
       setLoading(false);
     }
@@ -155,10 +169,6 @@ export default function TransactionsScreen() {
     router.push(`/tx-detail?txData=${txDataEncoded}`);
   };
 
-  const getAmountStyle = () => {
-    return 'negative';
-  };
-
   const getStatusStyle = (status: string) => {
     switch (status) {
       case 'completed':
@@ -175,17 +185,7 @@ export default function TransactionsScreen() {
   return (
     <View style={styles.container}>
       {/* 头部导航 */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Ionicons name="chevron-back" size={20} color="#000000" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>交易历史</Text>
-          <TouchableOpacity onPress={loadTransactions} style={styles.refreshBtn}>
-            <Ionicons name="refresh" size={20} color="#000000" />
-          </TouchableOpacity>
-        </View>
-      </View>
+
 
       {/* 搜索框 */}
       <View style={styles.searchSection}>

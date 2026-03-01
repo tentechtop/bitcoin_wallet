@@ -4,6 +4,11 @@ import { useState, useRef, useEffect } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { useRouter } from 'expo-router';
+import nacl from 'tweetnacl';
+import bs58 from 'bs58';
+import { HDKey } from '@scure/bip32';
+import CryptoJS from 'crypto-js';
+import { Buffer } from 'buffer';
 
 import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
@@ -17,7 +22,9 @@ import {
   getTxListByAddressInTxPool,
   calculateScriptPubKey,
   formatTransactionList,
-  Transaction
+  Transaction,
+  queryUTXOByAddress,
+  submitTransaction
 } from '@/utils/blockchainApi';
 
 export default function HomeScreen() {
@@ -46,6 +53,7 @@ export default function HomeScreen() {
     senderAddress: '',
     senderBalance: '0.00 BTC',
   });
+
 
   const [receiveData, setReceiveData] = useState({
     coinIndex: 0,
@@ -117,7 +125,7 @@ export default function HomeScreen() {
       const addressStr = typeof firstAddress === 'string' ? firstAddress : firstAddress.address;
 
       // 计算 scriptPubKey
-      const myScriptPubKey = await calculateScriptPubKey(addressStr);
+      const myScriptPubKey = calculateScriptPubKey(addressStr);
       console.log('查询交易池 - 地址:', myScriptPubKey);
 
       // 查询交易池
@@ -279,9 +287,580 @@ export default function HomeScreen() {
     });
   };
 
-  const handleConfirmSend = () => {
-    // TODO: 实现发送逻辑
-    Alert.alert('发送功能', '发送功能开发中');
+  const handleConfirmSend = async () => {
+    console.log('===== handleConfirmSend 被调用 =====');
+    console.log('sendData:', sendData);
+
+    // 表单验证
+    if (!sendData.toAddress) {
+      console.log('验证失败: 接收地址为空');
+      Alert.alert('提示', '请输入接收地址');
+      return;
+    }
+    console.log('接收地址验证通过:', sendData.toAddress);
+
+    if (!sendData.amount) {
+      console.log('验证失败: 发送金额为空');
+      Alert.alert('提示', '请输入发送金额');
+      return;
+    }
+    console.log('发送金额验证通过:', sendData.amount);
+
+    const amountValue = parseFloat(sendData.amount);
+    console.log('解析金额值:', amountValue);
+
+    if (amountValue <= 0) {
+      console.log('验证失败: 金额必须大于0');
+      Alert.alert('提示', '发送金额必须大于0');
+      return;
+    }
+
+    // 获取当前币种单位和信息
+    const coinUnit = getCoinUnitList(sendData.coinIndex);
+    const selectedCoin = coinList[sendData.coinIndex];
+    console.log('币种:', selectedCoin.name, '单位列表:', coinUnit);
+
+    // 转换为最小单位 (Satoshi for BTC)
+    const decimalPlaces = 100000000;
+    let amountInSmallestUnit: number;
+    if (sendData.amountUnitIndex === 0) {
+      amountInSmallestUnit = Math.floor(amountValue * decimalPlaces);
+    } else {
+      amountInSmallestUnit = Math.floor(amountValue);
+    }
+    console.log('转换为最小单位:', amountInSmallestUnit, 'satoshis');
+
+    const amountInMainUnit = amountInSmallestUnit / decimalPlaces;
+    console.log('转换为主单位:', amountInMainUnit, 'BTC');
+
+    // 处理手续费
+    let feeInSmallestUnit: number;
+    if (sendData.fee) {
+      const feeValue = parseFloat(sendData.fee);
+      console.log('解析手续费:', feeValue);
+      if (feeValue < 0) {
+        console.log('验证失败: 手续费不能为负数');
+        Alert.alert('提示', '手续费不能为负数');
+        return;
+      }
+      if (sendData.feeUnitIndex === 0) {
+        feeInSmallestUnit = Math.floor(feeValue * decimalPlaces);
+      } else {
+        feeInSmallestUnit = Math.floor(feeValue);
+      }
+    } else {
+      // 默认手续费 0.0001 BTC
+      feeInSmallestUnit = 10000;
+    }
+    console.log('手续费(satoshis):', feeInSmallestUnit);
+
+    const feeInMainUnit = feeInSmallestUnit / decimalPlaces;
+    const totalSmallestUnit = amountInSmallestUnit + feeInSmallestUnit;
+    const totalInMainUnit = totalSmallestUnit / decimalPlaces;
+
+    console.log('总额(satoshis):', totalSmallestUnit);
+    console.log('总额(BTC):', totalInMainUnit);
+
+    // 显示确认对话框
+    const coinName = selectedCoin.name;
+    const smallestUnitName = coinUnit[1];
+
+    console.log('准备显示确认对话框...');
+
+    Alert.alert(
+      '确认发送',
+      `确定要发送 ${amountInMainUnit.toFixed(8)} ${coinName} (${amountInSmallestUnit} ${smallestUnitName}) 到 ${sendData.toAddress} 吗?\n手续费: ${feeInMainUnit.toFixed(8)} ${coinName} (${feeInSmallestUnit} ${smallestUnitName})\n总计: ${totalInMainUnit.toFixed(8)} ${coinName} (${totalSmallestUnit} ${smallestUnitName})`,
+      [
+        { text: '取消', style: 'cancel' },
+        { text: '确认', onPress: () => {
+          console.log('用户点击了确认按钮');
+          executeSend(amountInMainUnit, feeInMainUnit, amountInSmallestUnit, feeInSmallestUnit);
+        }}
+      ]
+    );
+  };
+
+  // 执行发送
+  const executeSend = async (_amountInBTC: number, _feeInBTC: number, amountInSatoshis: number, feeInSatoshis: number) => {
+    try {
+      // 1. 获取钱包信息
+      const walletId = await multiWalletStorage.getActiveWalletId();
+      if (!walletId) {
+        Alert.alert('错误', '请先选择钱包');
+        return;
+      }
+
+      const wallet = await multiWalletStorage.getWalletById(walletId);
+      if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
+        Alert.alert('错误', '钱包中没有地址');
+        return;
+      }
+
+      // 2. 派生密钥和地址
+      const accountIdx = parseInt(sendData.accountIndex) || 0;
+      const addressIdx = parseInt(sendData.addressIndex) || 0;
+      const path = `m/44'/0'/${accountIdx}'/0/${addressIdx}`;
+
+      console.log('钱包ID:', walletId);
+      console.log('派生路径:', path);
+
+      // 使用空密码或固定密码解密种子
+      const password = ''; // 或者使用一个固定的密码
+      console.log('使用密码解密种子...');
+
+      const decryptedSeed = multiWalletStorage.decryptSeed(wallet.encryptedSeed, password);
+      if (!decryptedSeed) {
+        Alert.alert('错误', '解密种子失败');
+        return;
+      }
+
+      console.log('种子解密成功,长度:', decryptedSeed.length);
+
+      const seedBuffer = Buffer.from(decryptedSeed, 'hex');
+      const hdkey = HDKey.fromMasterSeed(seedBuffer);
+      const derivedKey = hdkey.derive(path);
+      const privateKeyBytes = derivedKey.privateKey;
+
+      if (!privateKeyBytes || privateKeyBytes.length !== 32) {
+        throw new Error(`私钥长度不正确`);
+      }
+
+      // 使用 Ed25519 生成密钥对
+      const keyPair = nacl.sign.keyPair.fromSeed(privateKeyBytes);
+      const publicKeyBytes = keyPair.publicKey;
+      const secretKeyBytes = keyPair.secretKey;
+
+      const senderAddress = bs58.encode(publicKeyBytes);
+      console.log('发送方地址:', senderAddress);
+      console.log('公钥长度:', publicKeyBytes.length);
+      console.log('私钥长度:', secretKeyBytes.length);
+
+      // 3. 查询UTXO
+      console.log('开始查询UTXO...');
+      const utxoList = await queryUTXOByAddress(senderAddress);
+
+      console.log('UTXO查询结果:', utxoList);
+
+      if (!utxoList || utxoList.length === 0) {
+        Alert.alert('错误', '该地址没有可用的UTXO');
+        return;
+      }
+
+      // 4. 计算需要的UTXO
+      const totalNeeded = amountInSatoshis + feeInSatoshis;
+
+      console.log('需要总金额:', totalNeeded, 'satoshis');
+      console.log('发送金额:', amountInSatoshis, 'satoshis');
+      console.log('手续费:', feeInSatoshis, 'satoshis');
+
+      let selectedUtxos: any[] = [];
+      let totalInput = 0;
+
+      // 选择UTXO
+      for (const utxo of utxoList) {
+        console.log('UTXO状态:', utxo.statusStr, 'value:', utxo.value);
+        if (utxo.statusStr === '已确认未花费') {
+          selectedUtxos.push(utxo);
+          totalInput += utxo.value;
+          if (totalInput >= totalNeeded) {
+            break;
+          }
+        }
+      }
+
+      console.log('选择的UTXO数量:', selectedUtxos.length);
+      console.log('输入总额:', totalInput, 'satoshis');
+
+      if (totalInput < totalNeeded) {
+        Alert.alert('错误', '余额不足');
+        return;
+      }
+
+      // 5. 构建交易输出
+      const outputs: any[] = [];
+      const change = totalInput - totalNeeded;
+
+      console.log('找零金额:', change, 'satoshis');
+
+      // 主输出：转账给目标地址
+      const targetScriptPubKey = calculateScriptPubKey(sendData.toAddress);
+      console.log('目标地址:', sendData.toAddress);
+      console.log('目标地址锁定脚本:', targetScriptPubKey);
+      console.log('目标地址锁定脚本长度:', targetScriptPubKey.length);
+
+      outputs.push({
+        value: amountInSatoshis,
+        scriptPubKey: targetScriptPubKey
+      });
+
+      // 找零输出
+      if (change > 0) {
+        const senderScriptPubKey = calculateScriptPubKey(senderAddress);
+        console.log('发送方scriptPubKey:', senderScriptPubKey);
+        console.log('发送方scriptPubKey长度:', senderScriptPubKey.length);
+        outputs.push({
+          value: change,
+          scriptPubKey: senderScriptPubKey
+        });
+      }
+
+      console.log('交易输出数量:', outputs.length);
+
+      // 6. 构建交易输入并签名每个输入
+      const inputs: any[] = [];
+      const SIGHASH_ALL = 0x01;
+
+      console.log('===== 开始构建交易输入并签名 =====');
+
+      for (let i = 0; i < selectedUtxos.length; i++) {
+        console.log(`\n--- 处理第${i + 1}个输入 ---`);
+        const utxo = selectedUtxos[i];
+        console.log('UTXO txId:', utxo.txId);
+        console.log('UTXO index:', utxo.index);
+        console.log('UTXO value:', utxo.value);
+
+        let currentUtxoScriptPubKey = utxo.script || utxo.scriptPubKey;
+        console.log('原始 scriptPubKey:', currentUtxoScriptPubKey);
+
+        // 如果scriptPubKey不是40个字符（20字节的hex），需要计算
+        if (currentUtxoScriptPubKey && currentUtxoScriptPubKey.length !== 40) {
+          currentUtxoScriptPubKey = calculateScriptPubKey(currentUtxoScriptPubKey);
+          console.log('计算后的 scriptPubKey:', currentUtxoScriptPubKey);
+        }
+
+        // 构建签名消息
+        const originalInputs = selectedUtxos.map((u, idx) => {
+          if (idx === i) {
+            return {
+              txId: u.txId,
+              index: u.index,
+              sequence: u.sequence || 0xFFFFFFFF,
+              scriptSig: currentUtxoScriptPubKey
+            };
+          } else {
+            return {
+              txId: u.txId,
+              index: u.index,
+              sequence: u.sequence || 0xFFFFFFFF,
+              scriptSig: ''
+            };
+          }
+        });
+
+        const signatureMessage = prepareSigningData(i, originalInputs, outputs, SIGHASH_ALL);
+        console.log('签名消息长度:', signatureMessage.length);
+
+        // 计算SHA256哈希
+        const messageWordArray = CryptoJS.lib.WordArray.create(signatureMessage);
+        const sha256Hash = CryptoJS.SHA256(messageWordArray);
+        console.log('SHA256哈希结果:', sha256Hash.toString(CryptoJS.enc.Hex));
+
+        const hashBytes = hexToBytes(sha256Hash.toString(CryptoJS.enc.Hex));
+        const hashUint8Array = new Uint8Array(hashBytes);
+
+        // 使用Ed25519对哈希后的消息签名
+        const signature = nacl.sign.detached(hashUint8Array, secretKeyBytes);
+        console.log('签名长度:', signature.length);
+        console.log('签名hex:', bufferToHex(signature));
+
+        // 本地验证签名
+        const isValid = nacl.sign.detached.verify(hashUint8Array, signature, publicKeyBytes);
+        console.log('本地签名验证结果:', isValid);
+
+        // 构建scriptSig: [64字节签名][1字节签名类型][32字节公钥]
+        const scriptSig = buildScriptSig(signature, publicKeyBytes);
+        console.log('scriptSig长度:', scriptSig.length / 2, '字节');
+
+        inputs.push({
+          txId: utxo.txId,
+          index: utxo.index,
+          sequence: 0xFFFFFFFF,
+          scriptSig: scriptSig
+        });
+
+        console.log(`输入${i}处理完成\n`);
+      }
+
+      console.log('===== 所有输入处理完成 =====');
+
+      // 7. 构建TransferDTO并提交
+      const transferData = {
+        version: 1,
+        lockTime: 0,
+        inputs: inputs,
+        outputs: outputs
+      };
+
+      console.log('===== 准备提交交易 =====');
+      console.log('版本号:', transferData.version);
+      console.log('锁定时间:', transferData.lockTime);
+      console.log('输入数量:', transferData.inputs.length);
+      transferData.inputs.forEach((input, idx) => {
+        console.log(`输入${idx}:`, {
+          txId: input.txId,
+          index: input.index,
+          scriptSig长度: input.scriptSig.length / 2,
+          scriptSig前缀: input.scriptSig.substring(0, 64) + '...'
+        });
+      });
+      console.log('输出数量:', transferData.outputs.length);
+      transferData.outputs.forEach((output, idx) => {
+        console.log(`输出${idx}:`, {
+          value: output.value,
+          scriptPubKey: output.scriptPubKey
+        });
+      });
+
+      console.log('提交交易数据:', JSON.stringify(transferData, null, 2));
+
+      const result = await submitTransaction(transferData);
+
+      console.log('提交交易结果:', result);
+
+      if (result && result.success) {
+        // 刷新余额
+        await loadWalletBalance();
+        await loadTransactions();
+
+        Alert.alert('成功', '交易已提交到网络');
+
+        // 关闭弹窗
+        closeSendModal();
+      } else {
+        Alert.alert('失败', result?.message || '交易提交失败');
+      }
+    } catch (error: any) {
+      console.error('发送失败:', error);
+      Alert.alert('错误', '发送失败: ' + (error.message || '未知错误'));
+    }
+  };
+
+  // 辅助方法：构建签名消息
+  const prepareSigningData = (inputIndex: number, originalInputs: any[], originalOutputs: any[], sighashType: number) => {
+    const baseSigHash = sighashType & 0x1F;
+    const anyoneCanPay = (sighashType & 0x80) !== 0;
+
+    const txCopy = {
+      version: 1,
+      lockTime: 0,
+      inputs: [] as any[],
+      outputs: [] as any[]
+    };
+
+    // 处理输入
+    if (anyoneCanPay) {
+      txCopy.inputs.push(originalInputs[inputIndex]);
+    } else {
+      for (let i = 0; i < originalInputs.length; i++) {
+        const input = originalInputs[i];
+        if (i === inputIndex) {
+          txCopy.inputs.push({
+            ...input,
+            sequence: input.sequence || 0xFFFFFFFF
+          });
+        } else {
+          txCopy.inputs.push({
+            txId: input.txId,
+            index: input.index,
+            sequence: input.sequence || 0xFFFFFFFF,
+            scriptSig: ''
+          });
+        }
+      }
+    }
+
+    // 处理输出
+    if (baseSigHash === 0x02) {
+      txCopy.outputs = [];
+    } else if (baseSigHash === 0x03) {
+      if (inputIndex >= originalOutputs.length) {
+        txCopy.outputs = [];
+      } else {
+        for (let i = 0; i < originalOutputs.length; i++) {
+          if (i < inputIndex || i === inputIndex) {
+            txCopy.outputs.push(originalOutputs[i]);
+          } else {
+            txCopy.outputs.push({
+              value: -1,
+              scriptPubKey: ''
+            });
+          }
+        }
+      }
+    } else {
+      for (const output of originalOutputs) {
+        txCopy.outputs.push(output);
+      }
+    }
+
+    // 序列化交易
+    const serializedTx = serializeTransaction(txCopy);
+
+    // 追加4字节小端序的sighashType
+    const sigHashBytes = littleEndianEncode(sighashType, 4);
+
+    const message = new Uint8Array([
+      ...serializedTx,
+      ...sigHashBytes
+    ]);
+
+    return message;
+  };
+
+  // 序列化交易
+  const serializeTransaction = (tx: any) => {
+    const result: number[] = [];
+
+    // 版本号
+    result.push(...littleEndianEncode(tx.version, 4));
+
+    // 输入数量
+    result.push(...encodeVarInt(tx.inputs.length));
+
+    // 序列化每个输入
+    for (const input of tx.inputs) {
+      result.push(...serializeInput(input));
+    }
+
+    // 输出数量
+    result.push(...encodeVarInt(tx.outputs.length));
+
+    // 序列化每个输出
+    for (const output of tx.outputs) {
+      result.push(...serializeOutput(output));
+    }
+
+    // 锁定时间
+    result.push(...littleEndianEncode(tx.lockTime, 4));
+
+    return new Uint8Array(result);
+  };
+
+  // 序列化输入
+  const serializeInput = (input: any) => {
+    const result: number[] = [];
+
+    // txId (32字节)
+    const txIdBytes = hexToBytes(input.txId);
+    result.push(...txIdBytes);
+
+    // index (4字节)
+    result.push(...littleEndianEncode(input.index, 4));
+
+    // sequence (4字节)
+    const sequence = input.sequence || 0xFFFFFFFF;
+    result.push(...littleEndianEncode(sequence, 4));
+
+    // scriptSig
+    const scriptSigBytes = hexToBytes(input.scriptSig || '');
+    result.push(...encodeVarInt(scriptSigBytes.length));
+    result.push(...scriptSigBytes);
+
+    return result;
+  };
+
+  // 序列化输出
+  const serializeOutput = (output: any) => {
+    const result: number[] = [];
+
+    // value (8字节)
+    result.push(...longToLittleEndian(output.value));
+
+    // scriptPubKey (20字节)
+    const scriptPubKeyBytes = hexToBytes(output.scriptPubKey || '');
+    result.push(...encodeVarInt(scriptPubKeyBytes.length));
+    result.push(...scriptPubKeyBytes);
+
+    return result;
+  };
+
+  // 构建scriptSig
+  const buildScriptSig = (signature: Uint8Array, publicKey: Uint8Array) => {
+    const scriptSig = new Uint8Array(97);
+
+    scriptSig.set(signature, 0);
+    scriptSig[64] = 0x01; // SIGHASH_ALL
+    scriptSig.set(publicKey, 65);
+
+    const hex = bufferToHex(scriptSig);
+    console.log('构建scriptSig:', {
+      签名长度: signature.length,
+      签名hex: bufferToHex(signature),
+      签名类型: '0x01 (SIGHASH_ALL)',
+      公钥长度: publicKey.length,
+      公钥hex: bufferToHex(publicKey),
+      scriptSig长度: scriptSig.length,
+      scriptSighex: hex
+    });
+
+    return hex;
+  };
+
+  // 小端编码
+  const littleEndianEncode = (num: number, bytes: number) => {
+    const result: number[] = [];
+    for (let i = 0; i < bytes; i++) {
+      result.push(num & 0xff);
+      num >>= 8;
+    }
+    return result;
+  };
+
+  // 小端编码long类型(8字节)
+  const longToLittleEndian = (num: number) => {
+    const result: number[] = [];
+    let bigNum = BigInt(num);
+    for (let i = 0; i < 8; i++) {
+      result.push(Number(bigNum & 0xffn));
+      bigNum >>= 8n;
+    }
+    return result;
+  };
+
+  // VarInt编码
+  const encodeVarInt = (value: number) => {
+    const bigValue = BigInt(value);
+    if (bigValue < 0xFdn) {
+      return [Number(bigValue)];
+    } else if (bigValue <= 0xFFFFn) {
+      return [0xFD, Number(bigValue & 0xFFn), Number((bigValue >> 8n) & 0xFFn)];
+    } else if (bigValue <= 0xFFFFFFFFn) {
+      return [
+        0xFE,
+        Number(bigValue & 0xFFn),
+        Number((bigValue >> 8n) & 0xFFn),
+        Number((bigValue >> 16n) & 0xFFn),
+        Number((bigValue >> 24n) & 0xFFn)
+      ];
+    } else {
+      return [
+        0xFF,
+        Number(bigValue & 0xFFn),
+        Number((bigValue >> 8n) & 0xFFn),
+        Number((bigValue >> 16n) & 0xFFn),
+        Number((bigValue >> 24n) & 0xFFn),
+        Number((bigValue >> 32n) & 0xFFn),
+        Number((bigValue >> 40n) & 0xFFn),
+        Number((bigValue >> 48n) & 0xFFn),
+        Number((bigValue >> 56n) & 0xFFn)
+      ];
+    }
+  };
+
+  // Hex字符串转字节数组
+  const hexToBytes = (hex: string) => {
+    const bytes: number[] = [];
+    for (let i = 0; i < hex.length; i += 2) {
+      bytes.push(parseInt(hex.substring(i, i + 2), 16));
+    }
+    return bytes;
+  };
+
+  // Buffer转Hex字符串
+  const bufferToHex = (buffer: Uint8Array) => {
+    return Array.from(buffer)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   };
 
   const handleCopyAddress = async (address: string) => {

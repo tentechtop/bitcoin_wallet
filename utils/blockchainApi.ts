@@ -351,22 +351,36 @@ export async function getTxListByAddress(
     const response = await axiosInstance.get(url);
     console.log('交易历史响应数据:', response.data);
 
-    if (response.data && response.data.success === true && response.data.result) {
-      // result 可能包含 data 字段，也可能是直接数组
-      const resultData = response.data.result.data || response.data.result;
-      if (Array.isArray(resultData)) {
-        return resultData;
+    if (response.data && response.data.success === true) {
+      // 处理 result 为 null 的情况（无交易）
+      if (!response.data.result) {
+        console.log('该地址暂无交易记录');
+        return [];
+      }
+
+      // 处理 result.data 包含交易数组的情况
+      if (response.data.result.data && Array.isArray(response.data.result.data)) {
+        return response.data.result.data;
+      }
+
+      // 处理 result 直接是数组的情况（兼容性处理）
+      if (Array.isArray(response.data.result)) {
+        return response.data.result;
       }
     }
+
     console.error('查询交易历史失败:', response.data?.message || '未知错误');
     return [];
   } catch (error: any) {
-    console.error(`查询地址 ${address} 的交易历史失败:`, error);
+    const errorMessage = error?.response?.data?.message || error?.message || '未知错误';
+    console.error(`查询地址 ${address} 的交易历史失败:`, errorMessage);
     if (error.response) {
       console.error('响应状态:', error.response.status);
       console.error('响应数据:', error.response.data);
     } else if (error.request) {
       console.error('请求已发送但没有收到响应:', error.message);
+    } else {
+      console.error('请求配置错误:', error.message);
     }
     return [];
   }
@@ -378,6 +392,11 @@ export async function getTxListByAddress(
  */
 export function calculateScriptPubKey(base58Address: string): string {
   try {
+    if (!base58Address || typeof base58Address !== 'string') {
+      console.error('无效的地址格式:', base58Address);
+      return '';
+    }
+
     // 1. Base58 解码
     const decoded = bs58.decode(base58Address);
 
@@ -392,8 +411,8 @@ export function calculateScriptPubKey(base58Address: string): string {
 
     // 5. 返回十六进制字符串
     return ripemd160Hash.toString(CryptoJS.enc.Hex);
-  } catch (error) {
-    console.error('计算 scriptPubKey 失败:', error);
+  } catch (error: any) {
+    console.error('计算 scriptPubKey 失败:', error?.message || error);
     return '';
   }
 }
@@ -499,3 +518,58 @@ export function formatTransactionList(
     };
   });
 }
+
+/**
+ * 提交交易到比特币网络
+ * @param transferData 交易数据
+ */
+export async function submitTransaction(transferData: {
+  version: number;
+  lockTime: number;
+  inputs: Array<{
+    txId: string;
+    index: number;
+    sequence: number;
+    scriptSig: string;
+  }>;
+  outputs: Array<{
+    value: number;
+    scriptPubKey: string;
+  }>;
+}): Promise<{ success: boolean; result?: string; message?: string }> {
+  try {
+    console.log('提交交易数据:', JSON.stringify(transferData, null, 2));
+
+    const response = await axiosInstance.post(`${API_BASE_URL}/transfer`, transferData);
+    console.log('提交交易响应:', response.data);
+
+    if (response.data && response.data.success === true) {
+      return {
+        success: true,
+        result: response.data.result,
+        message: response.data.message
+      };
+    } else {
+      return {
+        success: false,
+        message: response.data?.message || '交易提交失败'
+      };
+    }
+  } catch (error: any) {
+    console.error('提交交易失败:', error);
+    const errorMessage = error?.response?.data?.message || error?.message || '网络错误';
+    return {
+      success: false,
+      message: errorMessage
+    };
+  }
+}
+
+/**
+ * 查询地址的所有UTXO（用于发送交易）
+ * @param address 比特币地址
+ */
+export async function queryUTXOByAddress(address: string): Promise<UTXO[]> {
+  return getAddressUTXO(address, 2);
+}
+
