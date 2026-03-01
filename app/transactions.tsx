@@ -17,19 +17,30 @@ export default function TransactionsScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(15);
   const [hasMore, setHasMore] = useState(false);
-  const [lastKeys, setLastKeys] = useState<Record<string, string>>({}); // 存储每个地址的lastKey
+  const [pageKeys, setPageKeys] = useState<string[]>(['']); // 存储每一页的lastKey,索引0是第一页('')
+  const [isLastPage, setIsLastPage] = useState(false);
+  const [totalTransactions, setTotalTransactions] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
-      setCurrentPage(1);
-      setLastKeys({});
+      resetPagination();
       loadTransactions();
     }, [])
   );
 
+  // 重置分页状态
+  const resetPagination = () => {
+    setCurrentPage(1);
+    setPageKeys(['']);
+    setIsLastPage(false);
+    setTotalTransactions(0);
+  };
+
   // 当页码变化时重新加载
   useEffect(() => {
-    loadTransactions();
+    if (currentPage > 0) {
+      loadTransactions();
+    }
   }, [currentPage]);
 
   const loadTransactions = async () => {
@@ -42,6 +53,7 @@ export default function TransactionsScreen() {
       if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
         console.log('钱包没有地址,无法查询交易');
         setTransactions([]);
+        setIsLastPage(true);
         return;
       }
 
@@ -53,8 +65,17 @@ export default function TransactionsScreen() {
       // 存储所有交易
       const allTransactions: Transaction[] = [];
       const pendingTxIds = new Set<string>(); // 用于去重，避免交易池和交易历史中重复
-      const newLastKeys: Record<string, string> = { ...lastKeys };
-      let allLastPage = true;
+      let currentIsLastPage = true;
+      let nextLastKey = '';
+
+      // 计算所有钱包地址的scriptPubKey集合
+      const allScriptPubKeys = new Set<string>();
+      for (const address of addresses) {
+        if (typeof address === 'string') {
+          allScriptPubKeys.add(calculateScriptPubKey(address));
+        }
+      }
+      console.log('钱包地址的scriptPubKey集合:', allScriptPubKeys);
 
       // 第一步：查询所有地址的交易池（进行中的交易）
       console.log('===== 开始查询交易池（进行中的交易）=====');
@@ -65,15 +86,14 @@ export default function TransactionsScreen() {
             continue;
           }
 
-          const myScriptPubKey = calculateScriptPubKey(address);
           console.log(`查询地址 ${address} 的交易池...`);
 
           const txPoolData = await getTxListByAddressInTxPool(address);
           console.log(`地址 ${address} 的交易池查询结果:`, txPoolData);
 
           if (txPoolData && txPoolData.length > 0) {
-            // 使用 formatTransactionList 格式化交易池数据
-            const formattedTxs = formatTransactionList(txPoolData, myScriptPubKey);
+            // 使用 formatTransactionList 格式化交易池数据（传入所有地址的scriptPubKey集合）
+            const formattedTxs = formatTransactionList(txPoolData, allScriptPubKeys);
             formattedTxs.forEach(tx => {
               // 记录待确认交易ID，避免重复
               if (tx.txId) {
@@ -88,40 +108,41 @@ export default function TransactionsScreen() {
         }
       }
 
-      // 第二步：查询所有地址的交易历史（已完成的交易）- 真正的服务端分页
+      // 第二步：查询所有地址的交易历史（已完成的交易）- 使用服务端分页
       console.log('===== 开始查询交易历史（已完成的交易）=====');
       console.log(`当前页: ${currentPage}, 每页数量: ${pageSize}`);
 
-      for (const address of addresses) {
+      // 获取当前页的lastKey
+      const currentLastKey = pageKeys[currentPage - 1] || '';
+      console.log(`使用 lastKey: ${currentLastKey || '(空-第一页)'}`);
+
+      // 查询所有地址的交易历史（并发查询）
+      const promises = addresses.map(async (address) => {
         try {
           if (!address || typeof address !== 'string') {
             console.warn('跳过无效地址:', address);
-            continue;
+            return { address, transactions: [], lastKey: '', lastPage: true };
           }
 
-          const myScriptPubKey = calculateScriptPubKey(address);
           console.log(`查询地址 ${address} 的交易历史...`);
-
-          // 使用对应地址的 lastKey
-          const currentLastKey = lastKeys[address] || '';
-          console.log(`使用 lastKey: ${currentLastKey || '(空)'}`);
 
           const result = await getTxListByAddress(address, pageSize, currentLastKey);
           console.log(`地址 ${address} 的交易历史查询结果:`, result);
 
-          // 更新 lastKey（如果不是最后一页）
-          if (!result.lastPage && result.lastKey) {
-            newLastKeys[address] = result.lastKey;
+          // 保存下一页的lastKey（使用第一个地址的lastKey作为下一页的key）
+          if (result.lastKey && !nextLastKey) {
+            nextLastKey = result.lastKey;
           }
 
-          // 检查是否所有地址都是最后一页
+          // 检查是否是最后一页（只要有一个地址不是最后一页，就可以继续分页）
           if (!result.lastPage) {
-            allLastPage = false;
+            currentIsLastPage = false;
           }
 
           // 格式化交易数据
+          let formattedTxs: Transaction[] = [];
           if (result.data && result.data.length > 0) {
-            const formattedTxs = result.data.map((tx: any, index: number) => {
+            formattedTxs = result.data.map((tx: any, index: number) => {
               try {
                 // 跳过已经在交易池中的交易（避免重复）
                 if (tx.txId && pendingTxIds.has(tx.txId)) {
@@ -129,40 +150,67 @@ export default function TransactionsScreen() {
                   return null;
                 }
 
-                // 简化处理，根据交易数据判断类型
-                const isReceive = tx.outputs?.some((output: any) =>
-                  output.scriptPubKey === myScriptPubKey
-                );
+                // 计算该交易对钱包的净影响（收入 - 支出）
+                let totalReceived = 0; // 总收入（聪）
+                let totalSent = 0; // 总支出（聪）
+
+                // 计算总收入：输出中包含钱包地址的金额
+                if (tx.outputs && Array.isArray(tx.outputs)) {
+                  for (const output of tx.outputs) {
+                    if (allScriptPubKeys.has(output.scriptPubKey)) {
+                      totalReceived += output.value || 0;
+                    }
+                  }
+                }
+
+                // 计算总支出：输入中引用的UTXO属于钱包地址的金额
+                if (tx.inputs && Array.isArray(tx.inputs)) {
+                  for (const input of tx.inputs) {
+                    if (input.output && input.output.scriptPubKey && allScriptPubKeys.has(input.output.scriptPubKey)) {
+                      totalSent += input.output.value || 0;
+                    }
+                  }
+                }
+
+                // 净金额 = 收入 - 支出
+                const netAmount = totalReceived - totalSent;
+
+                // 判断交易类型
+                let isReceive = false;
+                let finalAmount = 0;
+                let title = '';
+
+                if (netAmount > 0) {
+                  // 净收入
+                  isReceive = true;
+                  finalAmount = netAmount;
+                  title = '接收BTC';
+                } else if (netAmount < 0) {
+                  // 净支出（取绝对值）
+                  isReceive = false;
+                  finalAmount = Math.abs(netAmount);
+                  title = '发送BTC';
+                } else {
+                  // 内部转账（收入等于支出）
+                  isReceive = false;
+                  finalAmount = totalSent; // 显示总金额
+                  title = '内部转账';
+                }
 
                 const type = isReceive ? 'receive' : 'send';
                 const icon = isReceive ? 'arrow-down' : 'arrow-up';
 
-                // 计算金额
-                let amount = 0;
-                if (isReceive) {
-                  // 计算接收金额
-                  amount = tx.outputs
-                    ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
-                    ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
-                } else {
-                  // 计算发送金额（总输入 - 找零）
-                  const totalInput = tx.inputs?.reduce((sum: number, input: any) =>
-                    sum + (input.output?.value || 0), 0) || 0;
-                  const changeAmount = tx.outputs
-                    ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
-                    ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
-                  amount = totalInput - changeAmount;
-                }
-
-                // 处理交易时间 - API 返回的数据中没有 time 字段，使用当前时间
+                // 处理交易时间
                 const txTime = tx.time ? new Date(tx.time).toLocaleString() : new Date().toLocaleString();
+
+                console.log(`交易 ${tx.txId}: 收入=${totalReceived}, 支出=${totalSent}, 净额=${netAmount}, 类型=${type}`);
 
                 return {
                   id: tx.txId || `tx_${Date.now()}_${index}`,
                   txId: tx.txId || '',
-                  title: isReceive ? '接收BTC' : '发送BTC',
+                  title,
                   time: txTime,
-                  amount: `${isReceive ? '+' : '-'} ${(amount / 100000000).toFixed(8)} BTC`,
+                  amount: `${isReceive ? '+' : '-'} ${(finalAmount / 100000000).toFixed(8)} BTC`,
                   type,
                   icon,
                   status: 'completed',
@@ -175,16 +223,40 @@ export default function TransactionsScreen() {
               }
             }).filter((tx): tx is Transaction => tx !== null);
 
-            allTransactions.push(...formattedTxs);
             console.log(`地址 ${address} 添加了 ${formattedTxs.length} 条历史交易`);
           }
+
+          return { address, transactions: formattedTxs };
         } catch (error: any) {
           console.error(`查询地址 ${address} 的交易历史失败:`, error?.message || error);
+          return { address, transactions: [], lastKey: '', lastPage: true };
         }
+      });
+
+      // 等待所有查询完成
+      const results = await Promise.all(promises);
+
+      // 合并所有地址的交易
+      for (const result of results) {
+        allTransactions.push(...result.transactions);
       }
 
-      // 更新 lastKeys 状态
-      setLastKeys(newLastKeys);
+      // 更新分页状态
+      setIsLastPage(currentIsLastPage);
+
+      // 如果有下一页的lastKey，保存到pageKeys
+      if (nextLastKey && !currentIsLastPage) {
+        setPageKeys(prev => {
+          const newKeys = [...prev];
+          // 确保当前页的lastKey已存在
+          if (newKeys[currentPage - 1] === undefined) {
+            newKeys[currentPage - 1] = currentLastKey;
+          }
+          // 保存下一页的lastKey
+          newKeys[currentPage] = nextLastKey;
+          return newKeys;
+        });
+      }
 
       // 按时间倒序排列（进行中的交易排在前面）
       allTransactions.sort((a, b) => {
@@ -199,11 +271,16 @@ export default function TransactionsScreen() {
       });
 
       console.log(`===== 加载完成，共 ${allTransactions.length} 条交易 =====`);
+      console.log(`当前是否最后一页: ${currentIsLastPage}`);
+      console.log(`下一页lastKey: ${nextLastKey || '(无)'}`);
       setTransactions(allTransactions);
-      setHasMore(!allLastPage);
+      setHasMore(!currentIsLastPage);
+      setTotalTransactions(allTransactions.length);
     } catch (error: any) {
       console.error('加载交易历史失败:', error?.message || error);
       setTransactions([]);
+      setIsLastPage(true);
+      setHasMore(false);
     } finally {
       setLoading(false);
     }
@@ -240,48 +317,71 @@ export default function TransactionsScreen() {
           typeof addr === 'string' ? addr : addr.address
         ) || [];
 
-        // 计算交易类型
-        let isReceive = false;
-        let myScriptPubKey = '';
-        let matchedAddress = '';
-
+        // 计算所有钱包地址的scriptPubKey集合
+        const allScriptPubKeys = new Set<string>();
         for (const address of myAddresses) {
           if (typeof address === 'string') {
-            myScriptPubKey = calculateScriptPubKey(address);
-            if (txData.outputs?.some((output: any) => output.scriptPubKey === myScriptPubKey)) {
-              isReceive = true;
-              matchedAddress = address;
-              break;
+            allScriptPubKeys.add(calculateScriptPubKey(address));
+          }
+        }
+
+        // 计算该交易对钱包的净影响（收入 - 支出）
+        let totalReceived = 0;
+        let totalSent = 0;
+
+        // 计算总收入
+        if (txData.outputs) {
+          for (const output of txData.outputs) {
+            if (allScriptPubKeys.has(output.scriptPubKey)) {
+              totalReceived += output.value || 0;
             }
           }
+        }
+
+        // 计算总支出
+        if (txData.inputs) {
+          for (const input of txData.inputs) {
+            if (input.output && input.output.scriptPubKey && allScriptPubKeys.has(input.output.scriptPubKey)) {
+              totalSent += input.output.value || 0;
+            }
+          }
+        }
+
+        // 净金额 = 收入 - 支出
+        const netAmount = totalReceived - totalSent;
+
+        // 判断交易类型
+        let isReceive = false;
+        let finalAmount = 0;
+        let title = '';
+
+        if (netAmount > 0) {
+          isReceive = true;
+          finalAmount = netAmount;
+          title = '接收BTC';
+        } else if (netAmount < 0) {
+          isReceive = false;
+          finalAmount = Math.abs(netAmount);
+          title = '发送BTC';
+        } else {
+          isReceive = false;
+          finalAmount = totalSent;
+          title = '内部转账';
         }
 
         const type = isReceive ? 'receive' : 'send';
         const icon = isReceive ? 'arrow-down' : 'arrow-up';
 
-        // 计算金额
-        let amount = 0;
-        if (isReceive) {
-          amount = txData.outputs
-            ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
-            ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
-        } else {
-          const totalInput = txData.inputs?.reduce((sum: number, input: any) =>
-            sum + (input.output?.value || 0), 0) || 0;
-          const changeAmount = txData.outputs
-            ?.filter((output: any) => output.scriptPubKey === myScriptPubKey)
-            ?.reduce((sum: number, output: any) => sum + output.value, 0) || 0;
-          amount = totalInput - changeAmount;
-        }
-
         const txTime = txData.time ? new Date(txData.time).toLocaleString() : new Date().toLocaleString();
+
+        console.log(`搜索交易 ${txData.txId}: 收入=${totalReceived}, 支出=${totalSent}, 净额=${netAmount}, 类型=${type}`);
 
         const transaction: Transaction = {
           id: txData.txId || `search_${Date.now()}`,
           txId: txData.txId || '',
-          title: isReceive ? '接收BTC' : '发送BTC',
+          title,
           time: txTime,
-          amount: `${isReceive ? '+' : '-'} ${(amount / 100000000).toFixed(8)} BTC`,
+          amount: `${isReceive ? '+' : '-'} ${(finalAmount / 100000000).toFixed(8)} BTC`,
           type,
           icon,
           status: 'completed',
@@ -318,11 +418,40 @@ export default function TransactionsScreen() {
     setSearchResult(null);
   };
 
-  // 分页计算
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const displayedTransactions = transactions.slice(startIndex, endIndex);
-  const totalPages = Math.ceil(transactions.length / pageSize);
+  // 下一页
+  const goToNextPage = () => {
+    if (!isLastPage) {
+      setCurrentPage(prev => prev + 1);
+    }
+  };
+
+  // 上一页
+  const goToPrevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(prev => prev - 1);
+    }
+  };
+
+  // 首页
+  const goToFirstPage = () => {
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+    }
+  };
+
+  // 末页（跳转到最后一页）
+  const goToLastPage = () => {
+    if (!isLastPage) {
+      // 由于不知道总页数，这里先保持当前页
+      // 用户可以点击"下一页"直到最后一页
+      console.log('跳转到最后一页');
+    }
+  };
+
+  // 显示的交易（服务端已分页，直接显示）
+  const displayedTransactions = transactions;
+  // 总页数（使用currentPage + 是否有下一页来估算）
+  const totalPages = isLastPage ? currentPage : currentPage + 1;
 
   const goToTxDetail = (tx: Transaction) => {
     const txDataEncoded = encodeURIComponent(JSON.stringify(tx));
@@ -454,11 +583,11 @@ export default function TransactionsScreen() {
             </View>
 
             {/* 分页控件 */}
-            {totalPages > 1 && (
+            {(currentPage > 1 || !isLastPage) && (
               <View style={styles.pagination}>
                 <TouchableOpacity
                   style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
-                  onPress={() => setCurrentPage(1)}
+                  onPress={goToFirstPage}
                   disabled={currentPage === 1}
                 >
                   <Text style={[styles.pageButtonText, currentPage === 1 && styles.pageButtonTextDisabled]}>首页</Text>
@@ -466,30 +595,30 @@ export default function TransactionsScreen() {
 
                 <TouchableOpacity
                   style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
-                  onPress={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  onPress={goToPrevPage}
                   disabled={currentPage === 1}
                 >
                   <Ionicons name="chevron-back" size={18} color={currentPage === 1 ? '#cccccc' : '#000000'} />
                 </TouchableOpacity>
 
                 <Text style={styles.pageInfo}>
-                  {currentPage} / {totalPages}
+                  {currentPage} {isLastPage ? `(共${currentPage}页)` : '+'}
                 </Text>
 
                 <TouchableOpacity
-                  style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
-                  onPress={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                  disabled={currentPage === totalPages}
+                  style={[styles.pageButton, isLastPage && styles.pageButtonDisabled]}
+                  onPress={goToNextPage}
+                  disabled={isLastPage}
                 >
-                  <Ionicons name="chevron-forward" size={18} color={currentPage === totalPages ? '#cccccc' : '#000000'} />
+                  <Ionicons name="chevron-forward" size={18} color={isLastPage ? '#cccccc' : '#000000'} />
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
-                  onPress={() => setCurrentPage(totalPages)}
-                  disabled={currentPage === totalPages}
+                  style={[styles.pageButton, isLastPage && styles.pageButtonDisabled]}
+                  onPress={goToLastPage}
+                  disabled={isLastPage}
                 >
-                  <Text style={[styles.pageButtonText, currentPage === totalPages && styles.pageButtonTextDisabled]}>末页</Text>
+                  <Text style={[styles.pageButtonText, isLastPage && styles.pageButtonTextDisabled]}>末页</Text>
                 </TouchableOpacity>
               </View>
             )}

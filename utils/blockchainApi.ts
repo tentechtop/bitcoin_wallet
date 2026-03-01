@@ -448,11 +448,11 @@ export function calculateScriptPubKey(base58Address: string): string {
 /**
  * 格式化交易列表
  * @param transactions 交易池交易列表
- * @param myScriptPubKey 我的 scriptPubKey
+ * @param myScriptPubKeys 钱包所有地址的scriptPubKey集合
  */
 export function formatTransactionList(
   transactions: TxPoolTransaction[],
-  myScriptPubKey: string
+  myScriptPubKeys: Set<string>
 ): Transaction[] {
   return transactions.map((tx, index) => {
     let type: 'send' | 'receive' | 'empty' = 'send';
@@ -472,34 +472,46 @@ export function formatTransactionList(
       const totalReceived = tx.outputs.reduce((sum, output) => sum + output.value, 0);
       amount = `+ ${(totalReceived / 100000000).toFixed(8)} BTC`;
     } else {
-      // 判断普通交易类型
-      const isSpender = tx.inputs.some(input =>
-        input.output && input.output.scriptPubKey === myScriptPubKey
-      );
+      // 计算该交易对钱包的净影响（收入 - 支出）
+      let totalReceived = 0;
+      let totalSent = 0;
 
-      const isRecipient = tx.outputs.some(output =>
-        output.scriptPubKey === myScriptPubKey
-      );
+      // 计算总收入
+      if (tx.outputs) {
+        for (const output of tx.outputs) {
+          if (myScriptPubKeys.has(output.scriptPubKey)) {
+            totalReceived += output.value || 0;
+          }
+        }
+      }
 
-      if (isSpender) {
-        // 支出交易
-        const totalInput = tx.inputs.reduce((sum, input) => sum + (input.output?.value || 0), 0);
-        const myOutput = tx.outputs.find(output => output.scriptPubKey === myScriptPubKey);
-        const changeAmount = myOutput ? myOutput.value : 0;
-        const actualSpent = totalInput - changeAmount;
+      // 计算总支出
+      if (tx.inputs) {
+        for (const input of tx.inputs) {
+          if (input.output && input.output.scriptPubKey && myScriptPubKeys.has(input.output.scriptPubKey)) {
+            totalSent += input.output.value || 0;
+          }
+        }
+      }
 
-        type = 'send';
-        icon = 'arrow-up';
-        amount = `- ${(actualSpent / 100000000).toFixed(8)} BTC`;
-      } else if (isRecipient && !isSpender) {
-        // 收入交易
-        const receivedAmount = tx.outputs
-          .filter(output => output.scriptPubKey === myScriptPubKey)
-          .reduce((sum, output) => sum + output.value, 0);
+      // 净金额 = 收入 - 支出
+      const netAmount = totalReceived - totalSent;
 
+      if (netAmount > 0) {
+        // 净收入
         type = 'receive';
         icon = 'arrow-down';
-        amount = `+ ${(receivedAmount / 100000000).toFixed(8)} BTC`;
+        amount = `+ ${(netAmount / 100000000).toFixed(8)} BTC`;
+      } else if (netAmount < 0) {
+        // 净支出
+        type = 'send';
+        icon = 'arrow-up';
+        amount = `- ${(Math.abs(netAmount) / 100000000).toFixed(8)} BTC`;
+      } else {
+        // 内部转账
+        type = 'send';
+        icon = 'arrow-up';
+        amount = `- ${(totalSent / 100000000).toFixed(8)} BTC`;
       }
     }
 
