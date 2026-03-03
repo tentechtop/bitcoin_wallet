@@ -112,7 +112,7 @@ export default function HomeScreen() {
     try {
       setLoadingTransactions(true);
 
-      // 获取第一个地址来查询交易
+      // 获取当前钱包
       const wallet = await multiWalletStorage.getActiveWallet();
       if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
         console.log('钱包没有地址,无法查询交易');
@@ -120,22 +120,55 @@ export default function HomeScreen() {
         return;
       }
 
-      // 使用第一个地址
-      const firstAddress = wallet.addresses[0];
-      const addressStr = typeof firstAddress === 'string' ? firstAddress : firstAddress.address;
+      // 计算所有钱包地址的scriptPubKey集合
+      const allScriptPubKeys = new Set<string>();
+      for (const addr of wallet.addresses) {
+        const addressStr = typeof addr === 'string' ? addr : addr.address;
+        if (typeof addressStr === 'string') {
+          allScriptPubKeys.add(calculateScriptPubKey(addressStr));
+        }
+      }
+      console.log('钱包地址的scriptPubKey集合:', allScriptPubKeys);
 
-      // 计算 scriptPubKey
-      const myScriptPubKey = calculateScriptPubKey(addressStr);
-      console.log('查询交易池 - 地址:', myScriptPubKey);
+      // 查询所有地址的交易池
+      const allTransactions: Transaction[] = [];
+      const seenTxIds = new Set<string>();
 
-      // 查询交易池
-      const txPoolData = await getTxListByAddressInTxPool(addressStr);
-      console.log('交易池查询结果:', txPoolData);
+      for (const addr of wallet.addresses) {
+        try {
+          const addressStr = typeof addr === 'string' ? addr : addr.address;
+          if (!addressStr || typeof addressStr !== 'string') {
+            console.warn('跳过无效地址:', addressStr);
+            continue;
+          }
 
-      if (txPoolData && txPoolData.length > 0) {
-        // 格式化交易数据
-        const formattedTxs = formatTransactionList(txPoolData, myScriptPubKey);
-        setTransactions(formattedTxs.slice(0, 10)); // 只显示最近10条
+          console.log('查询交易池 - 地址:', addressStr);
+
+          // 查询交易池
+          const txPoolData = await getTxListByAddressInTxPool(addressStr);
+          console.log('交易池查询结果:', txPoolData);
+
+          if (txPoolData && txPoolData.length > 0) {
+            // 格式化交易数据（传入所有地址的scriptPubKey集合）
+            const formattedTxs = formatTransactionList(txPoolData, allScriptPubKeys);
+
+            // 去重（避免同一笔交易在多个地址中重复）
+            for (const tx of formattedTxs) {
+              if (!seenTxIds.has(tx.txId)) {
+                seenTxIds.add(tx.txId);
+                allTransactions.push(tx);
+              }
+            }
+          }
+        } catch (error) {
+          console.error('查询交易池失败:', error);
+        }
+      }
+
+      if (allTransactions.length > 0) {
+        // 按时间倒序排列
+        allTransactions.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        setTransactions(allTransactions.slice(0, 10)); // 只显示最近10条
       } else {
         setTransactions([
           {
