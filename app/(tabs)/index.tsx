@@ -24,7 +24,8 @@ import {
   formatTransactionList,
   Transaction,
   queryUTXOByAddress,
-  submitTransaction
+  submitTransaction,
+  getAddressBalanceWithUTXO
 } from '@/utils/blockchainApi';
 
 export default function HomeScreen() {
@@ -32,6 +33,8 @@ export default function HomeScreen() {
   const [showSendModal, setShowSendModal] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [totalBalance, setTotalBalance] = useState<number>(0);
+  const [availableBalance, setAvailableBalance] = useState<number>(0);
+  const [maturingBalance, setMaturingBalance] = useState<number>(0);
   const [loadingBalance, setLoadingBalance] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
@@ -52,6 +55,7 @@ export default function HomeScreen() {
     senderAddress: '',
     senderBalance: '0.00 BTC',
     addressList: [] as (string | WalletAddress)[],
+    addressBalances: {} as { [key: number]: { availableBalance: number; utxoCount: number } },
   });
 
 
@@ -86,12 +90,16 @@ export default function HomeScreen() {
       if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
         console.log('钱包没有地址');
         setTotalBalance(0);
+        setAvailableBalance(0);
+        setMaturingBalance(0);
         return;
       }
 
       // 查询钱包余额
       const balanceInfo = await getWalletBalance(wallet.addresses, 2);
       setTotalBalance(balanceInfo.totalBalanceBTC);
+      setAvailableBalance(balanceInfo.availableBalance);
+      setMaturingBalance(balanceInfo.maturingBalance);
 
       // 更新钱包中的余额字段
       await multiWalletStorage.updateWalletBalance(walletId, balanceInfo.totalBalanceBTC);
@@ -219,12 +227,30 @@ export default function HomeScreen() {
       }
 
       // 初始化发送数据，加载钱包地址列表
+      const balances: { [key: number]: { availableBalance: number; utxoCount: number } } = {};
+      for (let i = 0; i < wallet.addresses.length; i++) {
+        const addr = wallet.addresses[i];
+        const addrStr = typeof addr === 'string' ? addr : (addr as WalletAddress).address;
+        try {
+          const result = await getAddressBalanceWithUTXO(addrStr);
+          if (result) {
+            balances[i] = {
+              availableBalance: result.availableBalance,
+              utxoCount: result.availableUtxos.length
+            };
+          }
+        } catch (e) {
+          // 忽略单个地址查询失败
+        }
+      }
+
       setSendData(prev => ({
         ...prev,
         addressList: wallet.addresses,
         selectedAddressIndex: -1,
         senderAddress: '',
         senderBalance: '0.00 BTC',
+        addressBalances: balances,
       }));
 
       setShowSendModal(true);
@@ -319,6 +345,7 @@ export default function HomeScreen() {
       senderAddress: '',
       senderBalance: '0.00 BTC',
       addressList: [],
+      addressBalances: {},
     });
   };
 
@@ -509,11 +536,11 @@ export default function HomeScreen() {
       console.log('公钥长度:', publicKeyBytes.length);
       console.log('私钥长度:', secretKeyBytes.length);
 
-      // 4. 查询UTXO
-      console.log('开始查询UTXO...');
+      // 4. 查询可花费的UTXO（使用新接口获取 availableBalanceUTXOList）
+      console.log('开始查询可花费UTXO...');
       const utxoList = await queryUTXOByAddress(senderAddress);
 
-      console.log('UTXO查询结果:', utxoList);
+      console.log('可花费UTXO查询结果:', utxoList?.length, '个');
 
       if (!utxoList || utxoList.length === 0) {
         Alert.alert('错误', '该地址没有可用的UTXO');
@@ -524,21 +551,16 @@ export default function HomeScreen() {
       const totalNeeded = amountInSatoshis + feeInSatoshis;
 
       console.log('需要总金额:', totalNeeded, 'satoshis');
-      console.log('发送金额:', amountInSatoshis, 'satoshis');
-      console.log('手续费:', feeInSatoshis, 'satoshis');
 
       let selectedUtxos: any[] = [];
       let totalInput = 0;
 
-      // 选择UTXO
+      // 选择UTXO（来自 availableBalanceUTXOList 的都是可花费的）
       for (const utxo of utxoList) {
-        console.log('UTXO状态:', utxo.statusStr, 'value:', utxo.value);
-        if (utxo.statusStr === '已确认未花费') {
-          selectedUtxos.push(utxo);
-          totalInput += utxo.value;
-          if (totalInput >= totalNeeded) {
-            break;
-          }
+        selectedUtxos.push(utxo);
+        totalInput += utxo.value;
+        if (totalInput >= totalNeeded) {
+          break;
         }
       }
 
@@ -974,10 +996,28 @@ export default function HomeScreen() {
         <ThemedText type="title" style={styles.totalBalance}>
           {loadingBalance ? '加载中...' : `${formatBTCBalance(totalBalance)} BTC`}
         </ThemedText>
+        
         {!loadingBalance && (
-          <TouchableOpacity onPress={loadWalletBalance} style={styles.refreshBtn}>
-            <Ionicons name="refresh" size={16} color="#666666" />
-          </TouchableOpacity>
+          <>
+            <View style={styles.balanceDetails}>
+              <View style={styles.balanceDetailItem}>
+                <ThemedText style={styles.balanceDetailLabel}>可用余额</ThemedText>
+                <ThemedText style={styles.balanceDetailValue}>
+                  {formatBTCBalance(availableBalance)} BTC
+                </ThemedText>
+              </View>
+              <View style={styles.balanceDetailItem}>
+                <ThemedText style={styles.balanceDetailLabel}>成熟中资产</ThemedText>
+                <ThemedText style={styles.balanceDetailValue}>
+                  {formatBTCBalance(maturingBalance)} BTC
+                </ThemedText>
+              </View>
+            </View>
+            
+            <TouchableOpacity onPress={loadWalletBalance} style={styles.refreshBtn}>
+              <Ionicons name="refresh" size={16} color="#666666" />
+            </TouchableOpacity>
+          </>
         )}
       </ThemedView>
 
@@ -1173,6 +1213,7 @@ export default function HomeScreen() {
                     {sendData.addressList.map((addr, index) => {
                       const addressStr = typeof addr === 'string' ? addr : addr.address;
                       const isSelected = index === sendData.selectedAddressIndex;
+                      const addrBalance = sendData.addressBalances[index];
                       return (
                         <TouchableOpacity
                           key={index}
@@ -1185,13 +1226,18 @@ export default function HomeScreen() {
                               ...sendData,
                               selectedAddressIndex: index,
                               senderAddress: addressStr,
-                              senderBalance: '0.00 BTC',
+                              senderBalance: addrBalance ? `${formatBTCBalance(addrBalance.availableBalance)} BTC (${addrBalance.utxoCount} UTXO)` : '0.00 BTC',
                             });
                           }}
                         >
                           <View style={styles.addressItemContent}>
                             <ThemedText style={styles.addressIndex}>地址 {index + 1}</ThemedText>
                             <ThemedText style={styles.addressText}>{addressStr}</ThemedText>
+                            {addrBalance && (
+                              <ThemedText style={styles.addressBalanceText}>
+                                可用: {formatBTCBalance(addrBalance.availableBalance)} BTC ({addrBalance.utxoCount} UTXO)
+                              </ThemedText>
+                            )}
                           </View>
                           {isSelected && (
                             <Ionicons name="checkmark-circle" size={20} color="#000000" />
@@ -1442,6 +1488,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 8,
     letterSpacing: 0.5,
+  },
+  balanceDetails: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    gap: 12,
+  },
+  balanceDetailItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  balanceDetailLabel: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  balanceDetailValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000000',
   },
   refreshBtn: {
     position: 'absolute',
@@ -1889,6 +1956,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#000000',
     fontFamily: 'monospace',
+  },
+  addressBalanceText: {
+    fontSize: 11,
+    color: '#007AFF',
+    marginTop: 2,
   },
   btnGroup: {
     marginTop: 20,

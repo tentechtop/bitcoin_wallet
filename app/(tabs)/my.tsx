@@ -29,6 +29,8 @@ export default function MyScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [walletName, setWalletName] = useState('');
     const [totalBalance, setTotalBalance] = useState(0);
+    const [availableBalance, setAvailableBalance] = useState(0);
+    const [maturingBalance, setMaturingBalance] = useState(0);
     const [addressCount, setAddressCount] = useState(0);
 
     useFocusEffect(
@@ -50,6 +52,8 @@ export default function MyScreen() {
             if (!walletId) {
                 setWalletName('未选择钱包');
                 setTotalBalance(0);
+                setAvailableBalance(0);
+                setMaturingBalance(0);
                 setAddressCount(0);
                 return;
             }
@@ -64,8 +68,12 @@ export default function MyScreen() {
                 if (wallet.addresses && wallet.addresses.length > 0) {
                     const balanceInfo = await getWalletBalance(wallet.addresses, 2);
                     setTotalBalance(balanceInfo.totalBalanceBTC);
+                    setAvailableBalance(balanceInfo.availableBalance);
+                    setMaturingBalance(balanceInfo.maturingBalance);
                 } else {
                     setTotalBalance(0);
+                    setAvailableBalance(0);
+                    setMaturingBalance(0);
                 }
             }
         } catch (error) {
@@ -251,6 +259,24 @@ export default function MyScreen() {
                             {totalBalance.toFixed(8)} BTC
                         </ThemedText>
                     )}
+                    
+                    {!loading && (
+                        <View style={styles.balanceDetails}>
+                            <View style={styles.balanceDetailRow}>
+                                <ThemedText style={styles.balanceDetailLabel}>可用余额</ThemedText>
+                                <ThemedText style={styles.balanceDetailValue}>
+                                    {availableBalance.toFixed(8)} BTC
+                                </ThemedText>
+                            </View>
+                            <View style={styles.balanceDetailRow}>
+                                <ThemedText style={styles.balanceDetailLabel}>成熟中资产</ThemedText>
+                                <ThemedText style={styles.balanceDetailValue}>
+                                    {maturingBalance.toFixed(8)} BTC
+                                </ThemedText>
+                            </View>
+                        </View>
+                    )}
+                    
                     <View style={styles.balanceActions}>
                         <TouchableOpacity 
                             style={styles.actionBtn} 
@@ -332,6 +358,28 @@ const styles = StyleSheet.create({
         color: '#000000',
         marginBottom: 16,
         lineHeight: 40,
+    },
+    balanceDetails: {
+        marginTop: 8,
+        marginBottom: 16,
+        paddingTop: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#e0e0e0',
+        gap: 8,
+    },
+    balanceDetailRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    balanceDetailLabel: {
+        fontSize: 14,
+        color: '#666666',
+    },
+    balanceDetailValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#000000',
     },
     balanceActions: {
         flexDirection: 'row',

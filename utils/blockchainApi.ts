@@ -36,14 +36,21 @@ export interface UTXO {
 
 // 余额信息接口
 export interface BalanceInfo {
-  totalBalance: number; // 总余额（聪）
-  totalBalanceBTC: number; // 总余额（BTC）
-  utxoCount: number; // UTXO 数量
+  totalBalance: number;
+  totalBalanceBTC: number;
+  availableBalance: number;
+  unavailableBalance: number;
+  maturingBalance: number;
+  utxoCount: number;
   addresses: {
     address: string;
     balance: number;
+    availableBalance: number;
+    unavailableBalance: number;
+    maturingBalance: number;
     utxoCount: number;
     utxos: UTXO[];
+    availableUtxos: UTXO[];
   }[];
 }
 
@@ -92,56 +99,189 @@ export interface TxPoolTransaction {
  */
 export async function getAddressUTXO(address: string, status: number = 2): Promise<UTXO[]> {
   try {
-    // 验证地址格式
     if (!address || typeof address !== 'string') {
-      console.error('无效的地址格式:', address);
       return [];
     }
 
-    console.log('[真机调试] 开始查询地址 UTXO:', address);
-    console.log('[真机调试] 当前时间:', new Date().toISOString());
     const url = `${API_BASE_URL}/getAddressAllUTXO?address=${encodeURIComponent(address)}&status=${status}`;
-    console.log('[真机调试] 请求 URL:', url);
-    console.log('[真机调试] axios配置:', {
-      timeout: axiosInstance.defaults.timeout,
-      baseURL: API_BASE_URL,
-    });
-
     const response = await axiosInstance.get(url);
-    console.log('[真机调试] 响应成功! 数据:', response.data);
 
-    if (response.data && response.data.code === 200 && response.data.success === true) {
+    // 处理字符串响应
+    if (typeof response.data === 'string') {
+      try {
+        response.data = JSON.parse(response.data);
+      } catch (e) {
+        return [];
+      }
+    }
+
+    const isSuccess = response.data &&
+                     (response.data.success === true || response.data.code === 200) &&
+                     response.data.result !== undefined;
+
+    if (isSuccess) {
       return response.data.result || [];
     } else {
       console.error('查询 UTXO 失败:', response.data?.message || '未知错误');
       return [];
     }
   } catch (error: any) {
-    console.error(`[真机调试] 查询地址 ${address} 的 UTXO 失败:`, error);
-    console.error('[真机调试] 错误详细信息:', {
-      message: error.message,
-      code: error.code,
-      config: error.config?.url,
-      timeout: error.code === 'ECONNABORTED' ? '超时' : '否',
-    });
-
-    if (error.response) {
-      console.error('[真机调试] 服务器响应状态:', error.response.status);
-      console.error('[真机调试] 响应数据:', error.response.data);
-    } else if (error.request) {
-      console.error('[真机调试] 请求已发送但没有收到响应，可能是网络问题:');
-      console.error('  - 错误码:', error.code);
-      console.error('  - 错误消息:', error.message);
-      console.error('  - 可能原因: 服务器不可达、网络被限制、防火墙阻止');
-    } else {
-      console.error('[真机调试] 请求配置错误:', error.message);
-    }
+    console.error(`查询地址 ${address} 的 UTXO 失败:`, error.message);
     return [];
   }
 }
 
 /**
- * 统计单个地址的余额
+ * 使用新接口查询单个地址的详细余额信息（包含可用/不可用余额 + UTXO列表）
+ * 接口: /getUTXOsByAddressAndCountAndUTXO
+ * 接口直接返回余额数据对象，没有 success/result 包装
+ * 返回中 availableBalanceUTXOList 是可花费的UTXO，maturingBalanceUTXOList 是成熟中的UTXO
+ * @param address 比特币地址
+ */
+export async function getAddressBalanceWithUTXO(address: string): Promise<{
+  balance: number;
+  balanceBTC: number;
+  availableBalance: number;
+  unavailableBalance: number;
+  maturingBalance: number;
+  utxoCount: number;
+  availableUtxos: UTXO[];
+  maturingUtxos: UTXO[];
+  utxos: UTXO[];
+} | null> {
+  try {
+    if (!address || typeof address !== 'string') {
+      return null;
+    }
+
+    const url = `${API_BASE_URL}/getUTXOsByAddressAndCountAndUTXO?address=${encodeURIComponent(address)}`;
+    const response = await axiosInstance.get(url);
+
+    if (typeof response.data === 'string') {
+      try {
+        response.data = JSON.parse(response.data);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    const data = response.data;
+    if (data && typeof data.totalBalance === 'number') {
+      const totalBalance = data.totalBalance / 100000000;
+      const availableBalance = (data.availableBalance || 0) / 100000000;
+      const unavailableBalance = (data.unavailableBalance || 0) / 100000000;
+      const maturingBalance = (data.maturingBalance || 0) / 100000000;
+
+      // 从接口返回中直接获取UTXO列表
+      const availableUtxos: UTXO[] = (data.availableBalanceUTXOList || []).map((u: any) => ({
+        txId: u.txId,
+        index: u.index,
+        value: u.value,
+        script: u.script,
+        scriptPubKeyString: u.scriptPubKeyString,
+        coinbase: u.coinbase || false,
+        height: u.height,
+        status: u.status,
+        statusStr: u.statusStr,
+        spendable: u.spendable,
+      }));
+
+      const maturingUtxos: UTXO[] = (data.maturingBalanceUTXOList || []).map((u: any) => ({
+        txId: u.txId,
+        index: u.index,
+        value: u.value,
+        script: u.script,
+        scriptPubKeyString: u.scriptPubKeyString,
+        coinbase: u.coinbase || false,
+        height: u.height,
+        status: u.status,
+        statusStr: u.statusStr,
+        spendable: u.spendable,
+      }));
+
+      const utxoCount = availableUtxos.length + maturingUtxos.length;
+
+      return {
+        balance: totalBalance,
+        balanceBTC: totalBalance,
+        availableBalance,
+        unavailableBalance,
+        maturingBalance,
+        utxoCount,
+        availableUtxos,
+        maturingUtxos,
+        utxos: [...availableUtxos, ...maturingUtxos]
+      };
+    }
+
+    return null;
+  } catch (error: any) {
+    console.error(`查询地址 ${address} 的余额和UTXO失败:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * 使用新接口查询单个地址的详细余额信息（包含可用/不可用余额）
+ * 接口直接返回余额数据对象，没有 success/result 包装
+ * @param address 比特币地址
+ */
+export async function getAddressBalanceWithDetails(address: string): Promise<{
+  balance: number;
+  balanceBTC: number;
+  availableBalance: number;
+  unavailableBalance: number;
+  maturingBalance: number;
+  utxoCount: number;
+  utxos: UTXO[];
+  availableUtxos: UTXO[];
+} | null> {
+  try {
+    if (!address || typeof address !== 'string') {
+      return null;
+    }
+
+    const url = `${API_BASE_URL}/getUTXOsByAddressAndCount?address=${encodeURIComponent(address)}`;
+    const response = await axiosInstance.get(url);
+
+    if (typeof response.data === 'string') {
+      try {
+        response.data = JSON.parse(response.data);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    const data = response.data;
+    if (data && typeof data.totalBalance === 'number') {
+      const totalBalance = data.totalBalance / 100000000;
+      const availableBalance = (data.availableBalance || 0) / 100000000;
+      const unavailableBalance = (data.unavailableBalance || 0) / 100000000;
+      const maturingBalance = (data.maturingBalance || 0) / 100000000;
+
+      const utxos = await getAddressUTXO(address, 2);
+
+      return {
+        balance: totalBalance,
+        balanceBTC: totalBalance,
+        availableBalance,
+        unavailableBalance,
+        maturingBalance,
+        utxoCount: utxos.filter(utxo => utxo.status === 2).length,
+        utxos: utxos,
+        availableUtxos: []
+      };
+    }
+
+    return null;
+  } catch (error: any) {
+    console.error(`查询地址 ${address} 的余额详情失败:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * 统计单个地址的余额（兼容旧版本）
  * @param address 比特币地址
  * @param status 状态码 (2 = 已确认)
  */
@@ -200,7 +340,7 @@ export async function getAddressBalance(address: string, status: number = 2): Pr
 }
 
 /**
- * 统计钱包的总余额（遍历所有地址）
+ * 统计钱包的总余额（遍历所有地址，使用新接口）
  * @param addresses 钱包中的地址列表（可以是字符串或对象）
  * @param status 状态码 (2 = 已确认)
  * @param onProgress 进度回调 (current, total)
@@ -212,28 +352,44 @@ export async function getWalletBalance(
 ): Promise<BalanceInfo> {
   const addressBalances = [];
   let totalBalance = 0; // BTC
+  let totalAvailableBalance = 0; // 可用余额
+  let totalUnavailableBalance = 0; // 不可用余额
+  let totalMaturingBalance = 0; // 成熟中资产
   let totalUTXOCount = 0;
-  let totalConfirmedBalance = 0;
-  let totalUnconfirmedBalance = 0;
-  let totalImmatureBalance = 0;
 
   // 提取有效的地址字符串
   const validAddresses = addresses
     .map(addr => typeof addr === 'string' ? addr : (addr as any).address)
     .filter(addr => addr && typeof addr === 'string');
 
-  // 并发查询所有地址的 UTXO
+  // 并发查询所有地址的详细余额（使用带UTXO列表的接口）
   const promises = validAddresses.map(async (address, index) => {
-    const result = await getAddressBalance(address, 0); // status=0 查询所有状态
+    const result = await getAddressBalanceWithUTXO(address);
 
     // 通知进度
     if (onProgress) {
       onProgress(index + 1, validAddresses.length);
     }
 
+    if (result) {
+      return {
+        address,
+        ...result
+      };
+    }
+
+    // 如果新接口失败，回退到旧接口
+    const fallbackResult = await getAddressBalance(address, 0);
     return {
       address,
-      ...result
+      balance: fallbackResult.balanceBTC,
+      balanceBTC: fallbackResult.balanceBTC,
+      availableBalance: fallbackResult.confirmedBalance,
+      unavailableBalance: fallbackResult.unconfirmedBalance + fallbackResult.immatureBalance,
+      maturingBalance: fallbackResult.immatureBalance,
+      utxoCount: fallbackResult.utxoCount,
+      utxos: fallbackResult.utxos,
+      availableUtxos: []
     };
   });
 
@@ -242,20 +398,27 @@ export async function getWalletBalance(
 
     // 统计总余额（已经是 BTC 单位）
     totalBalance = addressBalances.reduce((sum, addr) => sum + addr.balanceBTC, 0);
+    totalAvailableBalance = addressBalances.reduce((sum, addr) => sum + (addr.availableBalance || 0), 0);
+    totalUnavailableBalance = addressBalances.reduce((sum, addr) => sum + (addr.unavailableBalance || 0), 0);
+    totalMaturingBalance = addressBalances.reduce((sum, addr) => sum + (addr.maturingBalance || 0), 0);
     totalUTXOCount = addressBalances.reduce((sum, addr) => sum + addr.utxoCount, 0);
-    totalConfirmedBalance = addressBalances.reduce((sum, addr) => sum + (addr.confirmedBalance || 0), 0);
-    totalUnconfirmedBalance = addressBalances.reduce((sum, addr) => sum + (addr.unconfirmedBalance || 0), 0);
-    totalImmatureBalance = addressBalances.reduce((sum, addr) => sum + (addr.immatureBalance || 0), 0);
 
     return {
-      totalBalance, // BTC
+      totalBalance,
       totalBalanceBTC: totalBalance,
+      availableBalance: totalAvailableBalance,
+      unavailableBalance: totalUnavailableBalance,
+      maturingBalance: totalMaturingBalance,
       utxoCount: totalUTXOCount,
       addresses: addressBalances.map(item => ({
         address: item.address,
-        balance: item.balanceBTC, // BTC 单位
+        balance: item.balanceBTC,
+        availableBalance: item.availableBalance || 0,
+        unavailableBalance: item.unavailableBalance || 0,
+        maturingBalance: item.maturingBalance || 0,
         utxoCount: item.utxoCount,
-        utxos: item.utxos
+        utxos: item.utxos,
+        availableUtxos: item.availableUtxos || []
       }))
     };
   } catch (error) {
@@ -263,6 +426,9 @@ export async function getWalletBalance(
     return {
       totalBalance: 0,
       totalBalanceBTC: 0,
+      availableBalance: 0,
+      unavailableBalance: 0,
+      maturingBalance: 0,
       utxoCount: 0,
       addresses: []
     };
@@ -320,30 +486,32 @@ export function formatBTCBalance(btc: number, decimals: number = 8): string {
 export async function getTxListByAddressInTxPool(address: string): Promise<TxPoolTransaction[]> {
   try {
     if (!address || typeof address !== 'string') {
-      console.error('无效的地址格式:', address);
       return [];
     }
 
-    console.log('查询交易池 - 地址:', address);
     const url = `${API_BASE_URL}/getTxListByAddresInTxPool?address=${encodeURIComponent(address)}`;
-
     const response = await axiosInstance.get(url);
-    console.log('交易池响应数据:', response.data);
 
-    if (response.data && response.data.success === true && Array.isArray(response.data.result)) {
+    if (typeof response.data === 'string') {
+      try {
+        response.data = JSON.parse(response.data);
+      } catch (e) {
+        return [];
+      }
+    }
+
+    const isSuccess = response.data &&
+                     (response.data.success === true || response.data.code === 200) &&
+                     Array.isArray(response.data.result);
+
+    if (isSuccess) {
       return response.data.result;
     } else {
       console.error('查询交易池失败:', response.data?.message || '未知错误');
       return [];
     }
   } catch (error: any) {
-    console.error(`查询地址 ${address} 的交易池失败:`, error);
-    if (error.response) {
-      console.error('响应状态:', error.response.status);
-      console.error('响应数据:', error.response.data);
-    } else if (error.request) {
-      console.error('请求已发送但没有收到响应:', error.message);
-    }
+    console.error(`查询地址 ${address} 的交易池失败:`, error.message);
     return [];
   }
 }
@@ -606,10 +774,20 @@ export async function submitTransaction(transferData: {
 }
 
 /**
- * 查询地址的所有UTXO（用于发送交易）
+ * 查询地址的可花费UTXO列表（用于发送交易）
+ * 优先使用 getUTXOsByAddressAndCountAndUTXO 接口获取 availableBalanceUTXOList
  * @param address 比特币地址
  */
 export async function queryUTXOByAddress(address: string): Promise<UTXO[]> {
+  try {
+    const result = await getAddressBalanceWithUTXO(address);
+    if (result && result.availableUtxos && result.availableUtxos.length > 0) {
+      return result.availableUtxos;
+    }
+  } catch (error) {
+    console.error('通过新接口查询可花费UTXO失败，回退到旧接口:', error);
+  }
   return getAddressUTXO(address, 2);
 }
+
 

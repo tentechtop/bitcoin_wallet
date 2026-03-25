@@ -56,3 +56,6 @@ adb -s 11785d69 install F:\workSpace2026\blockchain\bitcoin-wallet\android\app\b
   ...
   "usesCleartextTraffic": true  // 允许HTTP明文流量
 }
+
+
+已做的修复：直接在 android/app/src/main/AndroidManifest.xml 的 <application> 标签上添加了 android:usesCleartextTraffic="true"。

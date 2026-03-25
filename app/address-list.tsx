@@ -4,7 +4,7 @@ import { multiWalletStorage } from '@/utils/secureStorage';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
-import { getAddressBalance, formatBTCBalance } from '@/utils/blockchainApi';
+import { getAddressBalanceWithUTXO, formatBTCBalance } from '@/utils/blockchainApi';
 
 interface WalletAddress {
     path: string;
@@ -21,7 +21,7 @@ export default function AddressListScreen() {
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
     const [selectedAddressIndex, setSelectedAddressIndex] = useState<number | null>(null);
     const [deletePassword, setDeletePassword] = useState('');
-    const [addressBalances, setAddressBalances] = useState<{ [key: number]: { balance: number; utxoCount: number } }>({});
+    const [addressBalances, setAddressBalances] = useState<{ [key: number]: { balance: number; availableBalance: number; maturingBalance: number; utxoCount: number } }>({});
     const [loadingAddressIndex, setLoadingAddressIndex] = useState<number | null>(null);
 
     useEffect(() => {
@@ -81,14 +81,20 @@ export default function AddressListScreen() {
     const handleQueryBalance = async (address: string, index: number) => {
         setLoadingAddressIndex(index);
         try {
-            const result = await getAddressBalance(address);
-            setAddressBalances(prev => ({
-                ...prev,
-                [index]: {
-                    balance: result.balanceBTC,
-                    utxoCount: result.utxoCount
-                }
-            }));
+            const result = await getAddressBalanceWithUTXO(address);
+            if (result) {
+                setAddressBalances(prev => ({
+                    ...prev,
+                    [index]: {
+                        balance: result.balanceBTC,
+                        availableBalance: result.availableBalance,
+                        maturingBalance: result.maturingBalance,
+                        utxoCount: result.utxoCount
+                    }
+                }));
+            } else {
+                Alert.alert('错误', '查询余额失败');
+            }
         } catch (error) {
             console.error('查询地址余额失败:', error);
             Alert.alert('错误', '查询余额失败');
@@ -175,26 +181,38 @@ export default function AddressListScreen() {
 
                             {/* 余额显示 */}
                             <View style={styles.balanceContainer}>
-                                <Text style={styles.balanceLabel}>余额:</Text>
-                                {addressBalances[index] ? (
-                                    <Text style={styles.balanceValue}>
-                                        {formatBTCBalance(addressBalances[index].balance)} BTC
-                                        {addressBalances[index].utxoCount > 0 && (
+                                <View style={styles.balanceRow}>
+                                    <Text style={styles.balanceLabel}>总余额:</Text>
+                                    {addressBalances[index] ? (
+                                        <Text style={styles.balanceValue}>
+                                            {formatBTCBalance(addressBalances[index].balance)} BTC
                                             <Text style={styles.utxoCount}> ({addressBalances[index].utxoCount} UTXO)</Text>
-                                        )}
-                                    </Text>
-                                ) : (
-                                    <TouchableOpacity
-                                        style={styles.queryBalanceButton}
-                                        onPress={() => handleQueryBalance(addr.address, index)}
-                                        disabled={loadingAddressIndex === index}
-                                    >
-                                        {loadingAddressIndex === index ? (
-                                            <ActivityIndicator size="small" color="#007AFF" />
-                                        ) : (
-                                            <Text style={styles.queryBalanceText}>查询余额</Text>
-                                        )}
-                                    </TouchableOpacity>
+                                        </Text>
+                                    ) : (
+                                        <TouchableOpacity
+                                            style={styles.queryBalanceButton}
+                                            onPress={() => handleQueryBalance(addr.address, index)}
+                                            disabled={loadingAddressIndex === index}
+                                        >
+                                            {loadingAddressIndex === index ? (
+                                                <ActivityIndicator size="small" color="#007AFF" />
+                                            ) : (
+                                                <Text style={styles.queryBalanceText}>查询余额</Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                                {addressBalances[index] && (
+                                    <View style={styles.balanceDetails}>
+                                        <View style={styles.balanceDetailRow}>
+                                            <Text style={styles.balanceDetailLabel}>可用余额:</Text>
+                                            <Text style={styles.balanceDetailText}>{formatBTCBalance(addressBalances[index].availableBalance)} BTC</Text>
+                                        </View>
+                                        <View style={styles.balanceDetailRow}>
+                                            <Text style={styles.balanceDetailLabel}>成熟中:</Text>
+                                            <Text style={styles.balanceDetailText}>{formatBTCBalance(addressBalances[index].maturingBalance)} BTC</Text>
+                                        </View>
+                                    </View>
                                 )}
                             </View>
 
@@ -348,12 +366,15 @@ const styles = StyleSheet.create({
         fontFamily: 'monospace',
     },
     balanceContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        flexDirection: 'column',
         backgroundColor: '#f8f9fa',
         borderRadius: 8,
         padding: 12,
         marginBottom: 12,
+    },
+    balanceRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     balanceLabel: {
         fontSize: 14,
@@ -364,6 +385,26 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         color: '#007AFF',
+    },
+    balanceDetails: {
+        marginTop: 8,
+        paddingTop: 8,
+        borderTopWidth: 1,
+        borderTopColor: '#e8e8e8',
+        gap: 4,
+    },
+    balanceDetailRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+    },
+    balanceDetailLabel: {
+        fontSize: 12,
+        color: '#999',
+    },
+    balanceDetailText: {
+        fontSize: 12,
+        color: '#333',
+        fontWeight: '500',
     },
     utxoCount: {
         fontSize: 12,

@@ -5,9 +5,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="9eb39d72-d3be-444a-bb31-81cf79a48c77" name="Changes" comment="完善交易判断">
-      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/(tabs)/index.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(tabs)/index.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/(tabs)/my.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(tabs)/my.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/address-list.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/address-list.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/blockchainApi.ts" beforeDir="false" afterPath="$PROJECT_DIR$/utils/blockchainApi.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/本地打包.txt" beforeDir="false" afterPath="$PROJECT_DIR$/本地打包.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
