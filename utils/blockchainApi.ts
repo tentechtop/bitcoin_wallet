@@ -67,6 +67,8 @@ export interface Transaction {
   statusText: string;
   isCoinbase?: boolean;
   rawData?: any;
+  timestamp?: number;
+  timeString?: string;
 }
 
 export interface TxInput {
@@ -90,6 +92,9 @@ export interface TxPoolTransaction {
   outputs: TxOutput[];
   status?: number;
   statusStr?: string;
+  time?: number;
+  timeString?: string;
+  timeStr?: string;
 }
 
 /**
@@ -695,8 +700,8 @@ export function formatTransactionList(
       statusText = '失败';
     }
 
-    // 格式化交易时间
-    const txTime = new Date().toLocaleString();
+    // 直接使用API返回的时间字符串
+    const txTime = tx.timeStr || tx.timeString || '';
 
     // 构建交易标题
     let title = '';
@@ -722,7 +727,8 @@ export function formatTransactionList(
       status,
       statusText,
       isCoinbase,
-      rawData: tx
+      rawData: tx,
+      timestamp: tx.time || 0,
     };
   });
 }

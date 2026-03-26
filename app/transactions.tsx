@@ -43,29 +43,6 @@ export default function TransactionsScreen() {
         }
     }, [currentPage]);
 
-    // 格式化交易时间为 yyyy-MM-dd HH:MM:SS
-    // 比特币时间戳是秒级（int32），需要转换为毫秒
-    const formatTransactionTime = (timestamp: number): string => {
-        // 判断是否为秒级时间戳（小于10位数字）
-        const isSeconds = timestamp < 10000000000;
-        const timestampInMs = isSeconds ? timestamp * 1000 : timestamp;
-
-        const date = new Date(timestampInMs);
-
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-
-        const hours = date.getHours();
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        const seconds = String(date.getSeconds()).padStart(2, '0');
-
-        // 小时也要补零
-        const hoursStr = String(hours).padStart(2, '0');
-
-        return `${year}-${month}-${day} ${hoursStr}:${minutes}:${seconds}`;
-    };
-
     const loadTransactions = async () => {
         try {
             setLoading(true);
@@ -240,17 +217,8 @@ export default function TransactionsScreen() {
                                     icon = 'arrow-up';
                                 }
 
-                                // 处理交易时间（使用API返回的timeString）
-                                let txTimeStr = '';
-                                if (tx.timeString) {
-                                    txTimeStr = tx.timeString;
-                                } else if (tx.time) {
-                                    // 尝试转换为毫秒（如果时间戳看起来像秒，乘以1000）
-                                    const txTimestamp = tx.time < 10000000000 ? tx.time * 1000 : tx.time;
-                                    txTimeStr = formatTransactionTime(txTimestamp);
-                                } else {
-                                    txTimeStr = formatTransactionTime(Date.now());
-                                }
+                                // 直接使用API返回的时间字符串
+                                const txTimeStr = (tx as any).timeStr || tx.timeString || '';
 
                                 console.log(`交易 ${tx.txId}: 收入=${totalReceived}, 支出=${totalSent}, 净额=${netAmount}, 类型=${type}, 时间=${txTimeStr}`);
 
@@ -259,7 +227,6 @@ export default function TransactionsScreen() {
                                     txId: tx.txId || '',
                                     title,
                                     time: txTimeStr,
-                                    timeString: tx.timeString || '', // 保存原始timeString
                                     amount: `${isReceive ? '+' : '-'} ${(finalAmount / 100000000).toFixed(8)} BTC`,
                                     type,
                                     icon,
@@ -448,17 +415,8 @@ export default function TransactionsScreen() {
                     icon = 'arrow-up';
                 }
 
-                // 处理交易时间（使用API返回的timeString）
-                let txTimeStr = '';
-                if (txData.timeString) {
-                    txTimeStr = txData.timeString;
-                } else if (txData.time) {
-                    // 尝试转换为毫秒（如果时间戳看起来像秒，乘以1000）
-                    const txTimestamp = txData.time < 10000000000 ? txData.time * 1000 : txData.time;
-                    txTimeStr = formatTransactionTime(txTimestamp);
-                } else {
-                    txTimeStr = formatTransactionTime(Date.now());
-                }
+                // 直接使用API返回的时间字符串
+                const txTimeStr = txData.timeStr || txData.timeString || '';
 
                 console.log(`搜索交易 ${txData.txId}: 收入=${totalReceived}, 支出=${totalSent}, 净额=${netAmount}, 类型=${type}`);
 
@@ -467,7 +425,6 @@ export default function TransactionsScreen() {
                     txId: txData.txId || '',
                     title,
                     time: txTimeStr,
-                    timeString: txData.timeString || '', // 保存原始timeString
                     amount: `${isReceive ? '+' : '-'} ${(finalAmount / 100000000).toFixed(8)} BTC`,
                     type,
                     icon,
