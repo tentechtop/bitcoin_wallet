@@ -5,6 +5,7 @@ import { multiWalletStorage } from '@/utils/secureStorage';
 import * as bip39 from 'bip39';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
+import { Buffer } from 'buffer';
 
 
 export default function CreateWalletScreen() {
@@ -14,6 +15,7 @@ export default function CreateWalletScreen() {
   const [walletPassword, setWalletPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [mnemonicPassword, setMnemonicPassword] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [languageList] = useState(['English', '简体中文', '繁體中文', '日本語', '한국어']);
   const [languageCodes] = useState(['english', 'chinese_simplified', 'chinese_traditional', 'japanese', 'korean']);
   const [selectedLanguageIndex, setSelectedLanguageIndex] = useState(0);
@@ -114,6 +116,8 @@ export default function CreateWalletScreen() {
 
 
   const handleSaveWallet = async () => {
+    if (isSaving) return;
+
     if (!walletName || walletName.trim().length === 0) {
       Alert.alert('提示', '请输入钱包名称');
       return;
@@ -134,11 +138,13 @@ export default function CreateWalletScreen() {
       return;
     }
 
+    setIsSaving(true);
     try {
       // 在保存时才生成种子（像欧易、币安一样）
-      const password = mnemonicPassword?.trim() || '';
+      // BIP39 passphrases are significant byte-for-byte, including spaces.
+      const password = mnemonicPassword || '';
       const seedBuffer = await bip39.mnemonicToSeed(mnemonic, password);
-      const seedHex = seedBuffer.toString('hex');
+      const seedHex = Buffer.from(seedBuffer).toString('hex');
 
 
       const walletData = {
@@ -157,7 +163,11 @@ export default function CreateWalletScreen() {
       if (result) {
         const activeWalletId = await multiWalletStorage.getActiveWalletId();
         if (!activeWalletId) {
-          await multiWalletStorage.setActiveWalletId(result.id);
+          const activated = await multiWalletStorage.setActiveWalletId(result.id);
+          if (!activated) {
+            Alert.alert('钱包已保存', '钱包数据已经保存，但设置默认钱包失败。请在钱包管理中手动选择该钱包。');
+            return;
+          }
         }
         Alert.alert(
           '成功',
@@ -175,6 +185,8 @@ export default function CreateWalletScreen() {
     } catch (error) {
       console.error('保存钱包失败:', error);
       Alert.alert('错误', '保存钱包失败');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -360,10 +372,11 @@ export default function CreateWalletScreen() {
         {/* 底部保存按钮 */}
         <View style={[styles.bottomBar, !hasMnemonic && styles.hidden]}>
             <TouchableOpacity
-                style={styles.saveButton}
+                style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
                 onPress={handleSaveWallet}
+                disabled={isSaving}
             >
-                <Text style={styles.saveButtonText}>保存钱包</Text>
+                <Text style={styles.saveButtonText}>{isSaving ? '保存中…' : '保存钱包'}</Text>
             </TouchableOpacity>
         </View>
 
@@ -609,6 +622,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
   },
   saveButtonText: {
     fontSize: 16,

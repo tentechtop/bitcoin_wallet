@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import CryptoJS from 'crypto-js';
 import { Platform } from 'react-native';
 
@@ -21,7 +22,20 @@ const webStorage = {
     try { localStorage.removeItem(key); } catch (error) { console.error('localStorage 删除失败:', error); throw error; }
   }
 };
-const storage = isSecureStoreAvailable ? SecureStore : webStorage;
+const asyncStorage = {
+  getItemAsync: (key: string): Promise<string | null> => AsyncStorage.getItem(key),
+  setItemAsync: (key: string, value: string): Promise<void> => AsyncStorage.setItem(key, value),
+  deleteItemAsync: (key: string): Promise<void> => AsyncStorage.removeItem(key)
+};
+
+// Wallet records contain encrypted seeds, mnemonics, passwords, and an
+// expandable address list. Android SecureStore has a small per-value limit,
+// so storing the whole wallet collection in it makes saving fail as soon as a
+// record grows beyond that limit. The sensitive fields remain encrypted before
+// they reach AsyncStorage. Keep SecureStore as a legacy source so existing
+// installs can migrate without losing wallets.
+const storage = Platform.OS === 'web' ? webStorage : asyncStorage;
+const legacyStorage = isSecureStoreAvailable ? SecureStore : null;
 
 type EncryptedParts = { encryptionKey: CryptoJS.lib.WordArray; macKey: CryptoJS.lib.WordArray };
 
@@ -153,7 +167,18 @@ function normalizeWallet(wallet: Partial<Wallet>): Wallet | null {
 export const multiWalletStorage = {
   async getWallets(): Promise<Wallet[]> {
     try {
-      const data = await storage.getItemAsync(WALLETS_STORAGE_KEY);
+      let data = await storage.getItemAsync(WALLETS_STORAGE_KEY);
+      if (!data && legacyStorage) {
+        const legacyData = await legacyStorage.getItemAsync(WALLETS_STORAGE_KEY);
+        if (legacyData) {
+          data = legacyData;
+          try {
+            await storage.setItemAsync(WALLETS_STORAGE_KEY, legacyData);
+          } catch (error) {
+            console.error('迁移钱包数据失败:', error);
+          }
+        }
+      }
       if (!data) return [];
       const parsed: unknown = JSON.parse(data);
       if (!Array.isArray(parsed)) return [];
@@ -233,7 +258,20 @@ export const multiWalletStorage = {
   },
 
   async getActiveWalletId(): Promise<string | null> {
-    try { return await storage.getItemAsync(ACTIVE_WALLET_KEY); } catch (error) { console.error('获取激活钱包ID失败:', error); return null; }
+    try {
+      let walletId = await storage.getItemAsync(ACTIVE_WALLET_KEY);
+      if (!walletId && legacyStorage) {
+        walletId = await legacyStorage.getItemAsync(ACTIVE_WALLET_KEY);
+        if (walletId) {
+          try {
+            await storage.setItemAsync(ACTIVE_WALLET_KEY, walletId);
+          } catch (error) {
+            console.error('迁移激活钱包失败:', error);
+          }
+        }
+      }
+      return walletId;
+    } catch (error) { console.error('获取激活钱包ID失败:', error); return null; }
   },
 
   async setActiveWalletId(walletId: string): Promise<boolean> {
