@@ -9,6 +9,7 @@ const ENCRYPTION_KEY = 'bitcoin_wallet_encryption';
 const ENCRYPTION_VERSION = 'v1';
 const PASSWORD_CHECK = 'bitcoin-wallet-password-check-v1';
 const PBKDF2_ITERATIONS = 100_000;
+const LEGACY_STORAGE_READ_TIMEOUT_MS = 3_000;
 
 const isSecureStoreAvailable = Platform.OS !== 'web';
 const webStorage = {
@@ -37,7 +38,25 @@ const asyncStorage = {
 const storage = Platform.OS === 'web' ? webStorage : asyncStorage;
 const legacyStorage = isSecureStoreAvailable ? SecureStore : null;
 
+async function readLegacyStorageItem(key: string): Promise<{ value: string | null; timedOut: boolean }> {
+  if (!legacyStorage) return { value: null, timedOut: false };
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      legacyStorage.getItemAsync(key).then(value => ({ value, timedOut: false })),
+      new Promise<{ value: null; timedOut: true }>(resolve => {
+        timeoutId = setTimeout(() => resolve({ value: null, timedOut: true }), LEGACY_STORAGE_READ_TIMEOUT_MS);
+      })
+    ]);
+    return result;
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 type EncryptedParts = { encryptionKey: CryptoJS.lib.WordArray; macKey: CryptoJS.lib.WordArray };
+type EncryptionContext = EncryptedParts & { salt: CryptoJS.lib.WordArray };
 
 function deriveKeys(password: string, salt: CryptoJS.lib.WordArray): EncryptedParts {
   const keyMaterial = CryptoJS.PBKDF2(password + ENCRYPTION_KEY, salt, {
@@ -49,6 +68,11 @@ function deriveKeys(password: string, salt: CryptoJS.lib.WordArray): EncryptedPa
   };
 }
 
+function createEncryptionContext(password: string): EncryptionContext {
+  const salt = CryptoJS.lib.WordArray.random(16);
+  return { salt, ...deriveKeys(password, salt) };
+}
+
 function constantTimeEqual(left: string, right: string): boolean {
   if (left.length !== right.length) return false;
   let difference = 0;
@@ -56,17 +80,19 @@ function constantTimeEqual(left: string, right: string): boolean {
   return difference === 0;
 }
 
-function encrypt(data: string, password: string): string {
-  const salt = CryptoJS.lib.WordArray.random(16);
+function encryptWithContext(data: string, context: EncryptionContext): string {
   const iv = CryptoJS.lib.WordArray.random(16);
-  const { encryptionKey, macKey } = deriveKeys(password, salt);
-  const ciphertext = CryptoJS.AES.encrypt(data, encryptionKey, { iv }).ciphertext;
-  const saltHex = salt.toString(CryptoJS.enc.Hex);
+  const ciphertext = CryptoJS.AES.encrypt(data, context.encryptionKey, { iv }).ciphertext;
+  const saltHex = context.salt.toString(CryptoJS.enc.Hex);
   const ivHex = iv.toString(CryptoJS.enc.Hex);
   const ciphertextBase64 = ciphertext.toString(CryptoJS.enc.Base64);
   const payload = `${ENCRYPTION_VERSION}.${saltHex}.${ivHex}.${ciphertextBase64}`;
-  const mac = CryptoJS.HmacSHA256(payload, macKey).toString(CryptoJS.enc.Hex);
+  const mac = CryptoJS.HmacSHA256(payload, context.macKey).toString(CryptoJS.enc.Hex);
   return `${payload}.${mac}`;
+}
+
+function encrypt(data: string, password: string): string {
+  return encryptWithContext(data, createEncryptionContext(password));
 }
 
 function decryptV1(encryptedData: string, password: string): string | null {
@@ -128,7 +154,7 @@ export interface Wallet {
 
 type WalletInput = Partial<Wallet> & { mnemonic?: string; seed?: string; password?: string };
 
-function normalizeAddress(address: string | WalletAddress, password?: string): string | WalletAddress {
+function normalizeAddress(address: string | WalletAddress, password?: string, context?: EncryptionContext): string | WalletAddress {
   if (typeof address === 'string') return address;
   if (!address || typeof address.address !== 'string') return '';
   // Keep the legacy TypeScript shape for callers while omitting privateKey at runtime.
@@ -138,13 +164,17 @@ function normalizeAddress(address: string | WalletAddress, password?: string): s
     publicKey: typeof address.publicKey === 'string' ? address.publicKey : ''
   } as WalletAddress;
   if (address.encryptedPrivateKey) normalized.encryptedPrivateKey = address.encryptedPrivateKey;
-  else if (address.privateKey && password !== undefined) normalized.encryptedPrivateKey = encrypt(address.privateKey, password);
+  else if (address.privateKey && password !== undefined) {
+    normalized.encryptedPrivateKey = context
+      ? encryptWithContext(address.privateKey, context)
+      : encrypt(address.privateKey, password);
+  }
   return normalized;
 }
 
-function normalizeAddresses(addresses: unknown, password?: string): (string | WalletAddress)[] {
+function normalizeAddresses(addresses: unknown, password?: string, context?: EncryptionContext): (string | WalletAddress)[] {
   if (!Array.isArray(addresses)) return [];
-  return addresses.map(address => normalizeAddress(address as string | WalletAddress, password)).filter(address => address !== '');
+  return addresses.map(address => normalizeAddress(address as string | WalletAddress, password, context)).filter(address => address !== '');
 }
 
 function normalizeWallet(wallet: Partial<Wallet>): Wallet | null {
@@ -169,7 +199,9 @@ export const multiWalletStorage = {
     try {
       let data = await storage.getItemAsync(WALLETS_STORAGE_KEY);
       if (!data && legacyStorage) {
-        const legacyData = await legacyStorage.getItemAsync(WALLETS_STORAGE_KEY);
+        const legacyRead = await readLegacyStorageItem(WALLETS_STORAGE_KEY);
+        if (legacyRead.timedOut) throw new Error('读取旧钱包数据超时，请解锁设备后重试');
+        const legacyData = legacyRead.value;
         if (legacyData) {
           data = legacyData;
           try {
@@ -191,7 +223,10 @@ export const multiWalletStorage = {
         catch (error) { console.error('迁移钱包数据失败:', error); }
       }
       return wallets;
-    } catch (error) { console.error('获取钱包列表失败:', error); return []; }
+    } catch (error) {
+      console.error('获取钱包列表失败:', error);
+      throw error;
+    }
   },
 
   async saveWallet(walletData: WalletInput, password: string): Promise<Wallet | null> {
@@ -199,15 +234,16 @@ export const multiWalletStorage = {
       if (typeof password !== 'string') return null;
       const wallets = await this.getWallets();
       const now = Date.now();
+      const encryptionContext = createEncryptionContext(password);
       const wallet: Wallet = {
         id: typeof walletData.id === 'string' && walletData.id.length > 0 ? walletData.id : generateWalletId(),
         name: typeof walletData.name === 'string' && walletData.name.trim() ? walletData.name.trim() : `钱包 ${wallets.length + 1}`,
         networkUrl: typeof walletData.networkUrl === 'string' ? walletData.networkUrl : '',
-        encryptedMnemonic: encrypt(typeof walletData.mnemonic === 'string' ? walletData.mnemonic : '', password),
-        encryptedSeed: encrypt(typeof walletData.seed === 'string' ? walletData.seed : '', password),
-        encryptedPassword: encrypt(PASSWORD_CHECK, password),
+        encryptedMnemonic: encryptWithContext(typeof walletData.mnemonic === 'string' ? walletData.mnemonic : '', encryptionContext),
+        encryptedSeed: encryptWithContext(typeof walletData.seed === 'string' ? walletData.seed : '', encryptionContext),
+        encryptedPassword: encryptWithContext(PASSWORD_CHECK, encryptionContext),
         balance: typeof walletData.balance === 'number' && Number.isFinite(walletData.balance) ? walletData.balance : 0,
-        addresses: normalizeAddresses(walletData.addresses, password),
+        addresses: normalizeAddresses(walletData.addresses, password, encryptionContext),
         createdAt: typeof walletData.createdAt === 'number' ? walletData.createdAt : now,
         updatedAt: now
       };
@@ -224,22 +260,42 @@ export const multiWalletStorage = {
       const index = wallets.findIndex(wallet => wallet.id === walletId);
       if (index < 0) return null;
       const current = wallets[index];
+      const encryptionContext = password !== undefined && typeof password === 'string'
+        ? createEncryptionContext(password)
+        : undefined;
       const updatedWallet: Wallet = {
         ...current,
         ...(typeof updateData.name === 'string' ? { name: updateData.name.trim() } : {}),
         ...(typeof updateData.networkUrl === 'string' ? { networkUrl: updateData.networkUrl } : {}),
         ...(typeof updateData.balance === 'number' && Number.isFinite(updateData.balance) ? { balance: updateData.balance } : {}),
-        ...(updateData.addresses !== undefined ? { addresses: normalizeAddresses(updateData.addresses, password) } : {}),
+        ...(updateData.addresses !== undefined ? { addresses: normalizeAddresses(updateData.addresses, password, encryptionContext) } : {}),
         updatedAt: Date.now()
       };
       // Never spread arbitrary input fields. Sensitive values are encrypted only when a password is supplied.
       if (password !== undefined && typeof password === 'string') {
-        if (typeof updateData.mnemonic === 'string') updatedWallet.encryptedMnemonic = encrypt(updateData.mnemonic, password);
-        if (typeof updateData.seed === 'string') updatedWallet.encryptedSeed = encrypt(updateData.seed, password);
-        if (typeof updateData.mnemonic === 'string' || typeof updateData.seed === 'string') {
-          updatedWallet.encryptedPassword = encrypt(PASSWORD_CHECK, password);
+        if (typeof updateData.mnemonic === 'string') {
+          updatedWallet.encryptedMnemonic = encryptionContext
+            ? encryptWithContext(updateData.mnemonic, encryptionContext)
+            : encrypt(updateData.mnemonic, password);
         }
-        if (typeof updateData.password === 'string') updatedWallet.encryptedPassword = encrypt(PASSWORD_CHECK, updateData.password);
+        if (typeof updateData.seed === 'string') {
+          updatedWallet.encryptedSeed = encryptionContext
+            ? encryptWithContext(updateData.seed, encryptionContext)
+            : encrypt(updateData.seed, password);
+        }
+        if (typeof updateData.mnemonic === 'string' || typeof updateData.seed === 'string') {
+          updatedWallet.encryptedPassword = encryptionContext
+            ? encryptWithContext(PASSWORD_CHECK, encryptionContext)
+            : encrypt(PASSWORD_CHECK, password);
+        }
+        if (typeof updateData.password === 'string') {
+          const passwordContext = updateData.password === password
+            ? encryptionContext
+            : createEncryptionContext(updateData.password);
+          updatedWallet.encryptedPassword = passwordContext
+            ? encryptWithContext(PASSWORD_CHECK, passwordContext)
+            : encrypt(PASSWORD_CHECK, updateData.password);
+        }
       }
       wallets[index] = updatedWallet;
       await storage.setItemAsync(WALLETS_STORAGE_KEY, JSON.stringify(wallets));
@@ -261,7 +317,9 @@ export const multiWalletStorage = {
     try {
       let walletId = await storage.getItemAsync(ACTIVE_WALLET_KEY);
       if (!walletId && legacyStorage) {
-        walletId = await legacyStorage.getItemAsync(ACTIVE_WALLET_KEY);
+        const legacyRead = await readLegacyStorageItem(ACTIVE_WALLET_KEY);
+        if (legacyRead.timedOut) throw new Error('读取旧激活钱包超时，请解锁设备后重试');
+        walletId = legacyRead.value;
         if (walletId) {
           try {
             await storage.setItemAsync(ACTIVE_WALLET_KEY, walletId);
