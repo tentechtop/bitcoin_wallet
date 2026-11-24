@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
-import { statusBarHeight } from '@/constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 import { multiWalletStorage } from '@/utils/secureStorage';
 import { router, useLocalSearchParams } from 'expo-router';
 import { HDKey } from '@scure/bip32';
@@ -26,6 +26,7 @@ export default function CreateAddressScreen() {
     const [derivedAddress, setDerivedAddress] = useState('');
     const [derivedPublicKey, setDerivedPublicKey] = useState('');
     const [derivedPrivateKey, setDerivedPrivateKey] = useState('');
+  const [showPrivateKey, setShowPrivateKey] = useState(false);
     const [walletPassword, setWalletPassword] = useState('');
     const [existingAddresses, setExistingAddresses] = useState<WalletAddress[]>([]);
     const [loading, setLoading] = useState(false);
@@ -60,8 +61,6 @@ export default function CreateAddressScreen() {
                     }
                 }
                 
-                // 自动生成地址
-                generateAddress();
             } else {
                 Alert.alert('错误', '钱包不存在');
             }
@@ -100,15 +99,17 @@ export default function CreateAddressScreen() {
 
             // 验证种子长度（十六进制格式，应该是64个字符，32字节）
             // 如果不是64字符，尝试解析
-            console.log('解密后的种子长度:', decryptedSeed.length);
-            
+            if (!/^[0-9a-f]+$/i.test(decryptedSeed) || decryptedSeed.length % 2 !== 0) {
+                Alert.alert('错误', '种子格式无效，请检查钱包密码');
+                return;
+            }
+
             // 将hex字符串转换为Uint8Array
             let seedBuffer: Uint8Array;
             try {
                 seedBuffer = new Uint8Array(
                     decryptedSeed.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
                 );
-                console.log('转换后的种子字节数:', seedBuffer.length);
             } catch (e) {
                 console.error('种子格式转换失败:', e);
                 Alert.alert('错误', '种子格式无效，请检查钱包密码');
@@ -116,8 +117,12 @@ export default function CreateAddressScreen() {
             }
 
             // 账户索引和地址索引
-            const accountIdx = parseInt(accountIndex) || 0;
-            const addressIdx = parseInt(addressIndex) || 0;
+            const accountIdx = Number.parseInt(accountIndex, 10);
+            const addressIdx = Number.parseInt(addressIndex, 10);
+            if (!Number.isInteger(accountIdx) || accountIdx < 0 || !Number.isInteger(addressIdx) || addressIdx < 0) {
+                Alert.alert('提示', '账户索引和地址索引必须是非负整数');
+                return;
+            }
 
             // 构建派生路径: m/44'/0'/account'/0/address
             const path = `m/44'/0'/${accountIdx}'/0/${addressIdx}`;
@@ -240,10 +245,14 @@ export default function CreateAddressScreen() {
             // 更新钱包的地址列表
             const updatedAddresses = [...wallet.addresses, newAddress];
 
-            await multiWalletStorage.updateWallet(
+            const updatedWallet = await multiWalletStorage.updateWallet(
                 walletId,
-                { addresses: updatedAddresses }
+                { addresses: updatedAddresses },
+                walletPassword
             );
+            if (!updatedWallet) {
+                throw new Error('保存地址失败');
+            }
 
             Alert.alert(
                 '成功',
@@ -372,11 +381,16 @@ export default function CreateAddressScreen() {
                         <View style={styles.formItem}>
                             <View style={styles.labelRow}>
                                 <Text style={[styles.formLabel, styles.dangerLabel]}>私钥 (Hex)</Text>
-                                <TouchableOpacity onPress={handleCopyPrivateKey}>
-                                    <Text style={styles.copyText}>复制</Text>
+                                <TouchableOpacity onPress={() => setShowPrivateKey(value => !value)}>
+                                    <Ionicons name={showPrivateKey ? 'eye-off-outline' : 'eye-outline'} size={19} color="#FF3B30" />
                                 </TouchableOpacity>
                             </View>
-                            <Text style={[styles.keyText, styles.dangerText]}>{derivedPrivateKey}</Text>
+                            <Text style={[styles.keyText, styles.dangerText]}>
+                                {showPrivateKey ? derivedPrivateKey : '••••••••••••••••••••••••••••••••'}
+                            </Text>
+                            <TouchableOpacity style={styles.copyPrivateButton} onPress={handleCopyPrivateKey}>
+                                <Text style={styles.copyText}>复制私钥</Text>
+                            </TouchableOpacity>
                         </View>
 
                         <TouchableOpacity
@@ -498,6 +512,14 @@ const styles = StyleSheet.create({
     },
     dangerText: {
         color: '#FF3B30',
+        backgroundColor: '#fff5f5',
+    },
+    copyPrivateButton: {
+        alignSelf: 'flex-end',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        marginTop: 8,
+        borderRadius: 7,
         backgroundColor: '#fff5f5',
     },
     saveButton: {

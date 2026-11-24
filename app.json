@@ -18,8 +18,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.bitcoinwallet",
-      "usesCleartextTraffic": true
+      "package": "com.anonymous.bitcoinwallet"
     },
     "web": {
       "output": "static",

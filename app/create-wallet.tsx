@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
-import { statusBarHeight } from '@/constants/theme';
+import { Palette, statusBarHeight } from '@/constants/theme';
 import { multiWalletStorage } from '@/utils/secureStorage';
 import * as bip39 from 'bip39';
 import { router } from 'expo-router';
@@ -11,8 +11,8 @@ export default function CreateWalletScreen() {
   const [walletName, setWalletName] = useState('新钱包');
   const [mnemonic, setMnemonic] = useState('');
   const [inputMnemonic, setInputMnemonic] = useState('');
-  const [seed, setSeed] = useState('');
   const [walletPassword, setWalletPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [mnemonicPassword, setMnemonicPassword] = useState('');
   const [languageList] = useState(['English', '简体中文', '繁體中文', '日本語', '한국어']);
   const [languageCodes] = useState(['english', 'chinese_simplified', 'chinese_traditional', 'japanese', 'korean']);
@@ -21,7 +21,6 @@ export default function CreateWalletScreen() {
   const [selectedWordCountIndex, setSelectedWordCountIndex] = useState(0);
 
   const hasMnemonic = mnemonic && mnemonic.length > 0;
-  const hasSeed = seed && seed.length > 0;
   const hasInputMnemonic = inputMnemonic && inputMnemonic.trim().length > 0;
 
   const handleGenerateMnemonic = () => {
@@ -34,8 +33,6 @@ export default function CreateWalletScreen() {
       const newMnemonic = bip39.generateMnemonic(strength, undefined, wordlist);
       setMnemonic(newMnemonic);
 
-      // 不立即生成种子，只在保存时生成（像欧易、币安一样）
-      setSeed('');
 
       Alert.alert('成功', '助记词已生成，请妥善保管！');
     } catch (error) {
@@ -73,8 +70,6 @@ export default function CreateWalletScreen() {
       setSelectedLanguageIndex(languageIdx);
       setMnemonic(normalizedMnemonic);
 
-      // 不立即生成种子，只在保存时生成（像欧易、币安一样）
-      setSeed('');
       setInputMnemonic('');
 
       Alert.alert('成功', '助记词验证成功！');
@@ -96,7 +91,6 @@ export default function CreateWalletScreen() {
           onPress: () => {
             setMnemonic('');
             setInputMnemonic('');
-            setSeed('');
           }
         }
       ]
@@ -119,20 +113,6 @@ export default function CreateWalletScreen() {
     };
 
 
-    const handleCopySeed = async () => {
-        try {
-            if (!seed) {
-                Alert.alert('提示', '暂无种子可复制');
-                return;
-            }
-            await Clipboard.setStringAsync(seed);
-            Alert.alert('成功', '种子已复制到剪贴板');
-        } catch (error) {
-            console.error('复制种子失败:', error);
-            Alert.alert('错误', '复制种子失败');
-        }
-    };
-
   const handleSaveWallet = async () => {
     if (!walletName || walletName.trim().length === 0) {
       Alert.alert('提示', '请输入钱包名称');
@@ -141,6 +121,16 @@ export default function CreateWalletScreen() {
 
     if (!mnemonic) {
       Alert.alert('提示', '请先生成或导入助记词');
+      return;
+    }
+
+    if (walletPassword.length < 8) {
+      Alert.alert('提示', '请设置至少 8 位的钱包密码');
+      return;
+    }
+
+    if (walletPassword !== confirmPassword) {
+      Alert.alert('提示', '两次输入的钱包密码不一致');
       return;
     }
 
@@ -155,16 +145,20 @@ export default function CreateWalletScreen() {
         name: walletName.trim(),
         mnemonic,
         seed: seedHex,
-        password: walletPassword?.trim() || '',
+        password: walletPassword,
         networkUrl: '',
       };
 
       const result = await multiWalletStorage.saveWallet(
         walletData,
-        walletPassword?.trim() || ''
+        walletPassword
       );
 
       if (result) {
+        const activeWalletId = await multiWalletStorage.getActiveWalletId();
+        if (!activeWalletId) {
+          await multiWalletStorage.setActiveWalletId(result.id);
+        }
         Alert.alert(
           '成功',
           '钱包创建成功！请务必妥善保管您的助记词。',
@@ -188,7 +182,6 @@ export default function CreateWalletScreen() {
     setSelectedLanguageIndex(index);
     if (mnemonic) {
       setMnemonic('');
-      setSeed('');
     }
   };
 
@@ -196,7 +189,6 @@ export default function CreateWalletScreen() {
     setSelectedWordCountIndex(index);
     if (mnemonic) {
       setMnemonic('');
-      setSeed('');
     }
   };
 
@@ -272,16 +264,25 @@ export default function CreateWalletScreen() {
                     </View>
                 </View>
 
-{/*                <View style={styles.formItem}>
-                    <Text style={styles.formLabel}>钱包密码（可选）</Text>
+                <View style={styles.formItem}>
+                    <Text style={styles.formLabel}>钱包密码</Text>
                     <TextInput
                         style={styles.formInput}
                         value={walletPassword}
                         onChangeText={setWalletPassword}
-                        placeholder="留空则不加密，或输入密码加密存储"
+                        placeholder="至少 8 位，用于解锁钱包"
                         placeholderTextColor="#999"
                         secureTextEntry
                     />
+                    <TextInput
+                        style={[styles.formInput, styles.formInputSpaced]}
+                        value={confirmPassword}
+                        onChangeText={setConfirmPassword}
+                        placeholder="再次输入钱包密码"
+                        placeholderTextColor="#999"
+                        secureTextEntry
+                    />
+                    <Text style={styles.formHint}>密码只保存在本机加密数据中，忘记后无法恢复。</Text>
                 </View>
 
                 <View style={styles.formItem}>
@@ -294,7 +295,7 @@ export default function CreateWalletScreen() {
                         placeholderTextColor="#999"
                         secureTextEntry
                     />
-                </View>*/}
+                </View>
 
                 {/* 导入助记词 */}
                 <View style={styles.formItem}>
@@ -328,17 +329,6 @@ export default function CreateWalletScreen() {
                             </View>
                         ))}
                     </View>
-                </View>
-
-                {/* 种子显示 */}
-                <View style={[styles.seedDisplay, !hasSeed && styles.hidden]}>
-                    <View style={styles.seedHeader}>
-                        <Text style={styles.seedLabel}>种子 (Seed)</Text>
-                        <TouchableOpacity style={styles.copyButton} onPress={handleCopySeed}>
-                            <Text style={styles.copyButtonText}>复制</Text>
-                        </TouchableOpacity>
-                    </View>
-                    <Text style={styles.seedValue}>{seed}</Text>
                 </View>
 
                 {/* 按钮组 */}
@@ -384,7 +374,7 @@ export default function CreateWalletScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Palette.canvas,
   },
   header: {
     flexDirection: 'row',
@@ -417,14 +407,17 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
+    backgroundColor: Palette.surface,
+    borderRadius: 20,
     padding: 20,
-    marginBottom: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: Palette.line,
   },
   cardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '800',
+    color: Palette.ink,
     marginBottom: 16,
   },
   formItem: {
@@ -432,19 +425,29 @@ const styles = StyleSheet.create({
   },
   formLabel: {
     fontSize: 14,
-    color: '#666666',
+    color: Palette.slate,
+    fontWeight: '600',
     marginBottom: 8,
   },
   formInput: {
     width: '100%',
     height: 44,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: Palette.canvas,
     borderWidth: 1,
-    borderColor: '#e8e8e8',
+    borderColor: Palette.line,
     borderRadius: 8,
     paddingHorizontal: 12,
     fontSize: 14,
-    color: '#000000',
+    color: Palette.ink,
+  },
+  formInputSpaced: {
+    marginTop: 10,
+  },
+  formHint: {
+    color: Palette.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 8,
   },
   formTextarea: {
     width: '100%',

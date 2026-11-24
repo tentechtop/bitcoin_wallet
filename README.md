@@ -1,6 +1,6 @@
 # Bitcoin Wallet
 
-面向移动端的比特币钱包工程，基于 Expo Router、React Native、TypeScript 构建。项目覆盖钱包创建、助记词导入、HD 地址派生、地址二维码、余额/UTXO 查询、交易记录、交易详情和基础发送流程，适合作为链上钱包 App 的前端工程底座。
+面向移动端的比特币钱包工程，基于 Expo Router、React Native、TypeScript 构建。项目覆盖钱包创建、助记词导入、HD 地址派生、地址二维码、余额/UTXO 查询、交易记录、交易详情和交易发送流程，适合作为链上钱包 App 的前端工程底座。
 
 > 重要说明：当前项目依赖自定义链上服务接口，并且地址生成逻辑以现有后端协议为准。请先在测试网络或私有网络完成安全审计、签名验证、接口验收和资金闭环测试，不要直接承载主网真实资产。
 
@@ -10,13 +10,14 @@
 | --- | --- | --- |
 | 多钱包管理 | 已实现 | 支持创建、切换、删除钱包，维护当前激活钱包 |
 | 助记词生成/导入 | 已实现 | 支持 12/18/24 词，支持多语言词表验证 |
-| 种子安全存储 | 已实现 | Native 使用 Expo SecureStore，Web 降级 localStorage |
+| 助记词备份 | 已实现 | 需要验证钱包密码后查看，支持隐藏和复制 |
+| 种子安全存储 | 已实现 | Native 使用 Expo SecureStore，Web 降级 localStorage，敏感数据使用带认证加密 |
 | HD 地址派生 | 已实现 | 使用 `m/44'/0'/account'/0/address` 路径生成地址 |
 | 地址管理 | 已实现 | 支持地址列表、二维码、复制、公钥/私钥查看与删除 |
 | 余额查询 | 已实现 | 通过链上接口查询总余额、可用余额、成熟中余额和 UTXO |
 | 交易记录 | 已实现 | 聚合交易池与历史交易，支持分页、去重和交易 ID 搜索 |
-| 交易详情 | 已实现 | 展示交易 ID、时间、类型、状态和金额 |
-| 发送交易 | 基础可用 | 选择 UTXO、构建输出、提交到后端 `/transfer` 接口 |
+| 交易详情 | 已实现 | 展示交易 ID、时间、类型、状态和金额，并支持按交易 ID从节点加载详情 |
+| 发送交易 | 已实现 | 验证钱包密码后签名，选择可花费 UTXO、构建找零输出并提交到后端 `/transfer` 接口 |
 | Android APK 打包 | 已配置 | 支持 EAS preview/production APK 构建 |
 
 ## 架构视图
@@ -116,14 +117,14 @@ npm run ios
 npm run web
 ```
 
-> Android 真机调试时，当前链上服务使用公网 IP。不要改成 `localhost`，真机无法直接访问开发机 localhost。
+> Android 真机调试时，请在“我的钱包 → 网络状态”配置设备可访问的 HTTPS 节点。`localhost` 仅适用于运行在同一设备上的本地开发服务。
 
 ## 链上服务配置
 
-当前链上接口集中在 `utils/blockchainApi.ts`：
+链上接口通过 `utils/networkConfig.ts` 配置，应用内可以在“我的钱包 → 网络状态”中保存节点地址。
 
 ```text
-http://101.35.87.31:18333/bitcoin/chain
+EXPO_PUBLIC_BITCOIN_API_URL=https://node.example.com/bitcoin/chain
 ```
 
 已使用的接口能力：
@@ -133,13 +134,14 @@ http://101.35.87.31:18333/bitcoin/chain
 - `getUTXOsByAddressAndCount`
 - `getTxListByAddresInTxPool`
 - `getTxListByAddres`
+- `getTxByHash`
 - `transfer`
 
-上线前建议将接口地址改为环境变量或配置中心，不要把生产节点地址硬编码在客户端包内。
+远程节点必须使用 HTTPS，本机 localhost 可用于开发调试。未配置节点时，余额、交易查询和广播会明确提示配置节点。
 
 ## 安全边界
 
-本项目遵循非托管钱包的基础边界：助记词、种子、私钥优先保存在本地，交易构建前从本地钱包状态派生必要密钥。
+本项目遵循非托管钱包的基础边界：助记词、种子和签名密钥优先保存在本地，交易构建前从本地钱包状态派生必要密钥。新建钱包需要至少 8 位钱包密码，密码用于本地解密和交易签名。
 
 生产环境必须重点审查：
 
@@ -148,8 +150,7 @@ http://101.35.87.31:18333/bitcoin/chain
 - 钱包密码为空时的存储与解密行为
 - 地址格式与真实 Bitcoin 主网地址规范的一致性
 - 交易签名算法、scriptPubKey 计算和后端验签规则
-- HTTP 明文链上服务带来的中间人攻击风险
-- Android `usesCleartextTraffic` 当前为 `true`，生产包应关闭或限制域名
+- HTTP 明文链上服务带来的中间人攻击风险。远程节点配置会拒绝 HTTP
 
 ## 打包 APK
 

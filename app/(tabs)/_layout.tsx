@@ -1,9 +1,9 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -18,30 +18,35 @@ export default function TabLayout() {
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarStyle: {
-          backgroundColor: Colors[colorScheme ?? 'light'].background,
-          borderTopColor: colorScheme === 'dark' ? '#1a1a1a' : '#e5e5e5',
+          backgroundColor: colorScheme === 'dark' ? '#111B2E' : '#FFFFFF',
+          borderTopColor: colorScheme === 'dark' ? '#24324A' : '#EAECF0',
           borderTopWidth: 1,
-          paddingBottom: 5 + insets.bottom,
-          height: 60 + insets.bottom,
+          paddingTop: 8,
+          paddingBottom: 8 + insets.bottom,
+          height: 68 + insets.bottom,
         },
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: '600',
-          marginTop: 4,
+          marginTop: 2,
         },
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: '首页',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="my"
         options={{
           title: '我的',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={22} color={color} />
+          ),
         }}
       />
     </Tabs>

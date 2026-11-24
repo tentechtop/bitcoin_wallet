@@ -4,8 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { statusBarHeight } from '@/constants/theme';
 import { multiWalletStorage, WalletAddress } from '@/utils/secureStorage';
-import { Transaction, getTxListByAddress, calculateScriptPubKey, getTxListByAddressInTxPool, formatTransactionList } from '@/utils/blockchainApi';
-import axios from 'axios';
+import { Transaction, getTxListByAddress, calculateScriptPubKey, getTxListByAddressInTxPool, formatTransactionList, getTransactionByHash } from '@/utils/blockchainApi';
 
 export default function TransactionsScreen() {
     const router = useRouter();
@@ -71,8 +70,9 @@ export default function TransactionsScreen() {
             // 计算所有钱包地址的scriptPubKey集合
             const allScriptPubKeys = new Set<string>();
             for (const address of addresses) {
-                if (typeof address === 'string') {
-                    allScriptPubKeys.add(calculateScriptPubKey(address));
+                const scriptPubKey = calculateScriptPubKey(address);
+                if (scriptPubKey) {
+                    allScriptPubKeys.add(scriptPubKey.toLowerCase());
                 }
             }
             console.log('钱包地址的scriptPubKey集合:', allScriptPubKeys);
@@ -162,7 +162,7 @@ export default function TransactionsScreen() {
                                 // 计算总收入：输出中包含钱包地址的金额
                                 if (tx.outputs && Array.isArray(tx.outputs)) {
                                     for (const output of tx.outputs) {
-                                        if (allScriptPubKeys.has(output.scriptPubKey)) {
+                                        if (allScriptPubKeys.has(String(output.scriptPubKey || '').toLowerCase())) {
                                             totalReceived += output.value || 0;
                                         }
                                     }
@@ -171,7 +171,7 @@ export default function TransactionsScreen() {
                                 // 计算总支出：输入中引用的UTXO属于钱包地址的金额
                                 if (tx.inputs && Array.isArray(tx.inputs)) {
                                     for (const input of tx.inputs) {
-                                        if (input.output && input.output.scriptPubKey && allScriptPubKeys.has(input.output.scriptPubKey)) {
+                                        if (input.output && input.output.scriptPubKey && allScriptPubKeys.has(String(input.output.scriptPubKey).toLowerCase())) {
                                             totalSent += input.output.value || 0;
                                         }
                                     }
@@ -219,6 +219,9 @@ export default function TransactionsScreen() {
 
                                 // 直接使用API返回的时间字符串
                                 const txTimeStr = (tx as any).timeStr || tx.timeString || '';
+                                const txStatus = Number(tx.status);
+                                const status: Transaction['status'] = txStatus === 3 ? 'failed' : txStatus === 2 ? 'completed' : 'pending';
+                                const statusText = status === 'failed' ? '失败' : status === 'completed' ? '已完成' : '待确认';
 
                                 console.log(`交易 ${tx.txId}: 收入=${totalReceived}, 支出=${totalSent}, 净额=${netAmount}, 类型=${type}, 时间=${txTimeStr}`);
 
@@ -230,8 +233,8 @@ export default function TransactionsScreen() {
                                     amount: `${isReceive ? '+' : '-'} ${(finalAmount / 100000000).toFixed(8)} BTC`,
                                     type,
                                     icon,
-                                    status: 'completed',
-                                    statusText: '已完成',
+                                    status,
+                                    statusText,
                                     isCoinbase, // 标记是否为coinbase交易
                                     rawData: tx,
                                     timestamp: tx.time, // 保存原始时间戳用于排序
@@ -321,21 +324,9 @@ export default function TransactionsScreen() {
 
         try {
             setLoading(true);
-            const url = `http://101.35.87.31:3000/transaction/${txId.trim()}`;
-            console.log('搜索交易:', url);
+            const txData = await getTransactionByHash(txId.trim());
 
-            const response = await axios.get(url, {
-                timeout: 60000,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                },
-            });
-
-            console.log('搜索结果:', response.data);
-
-            if (response.data && response.data.success === true && response.data.result) {
-                const txData = response.data.result;
+            if (txData) {
 
                 // 获取当前钱包地址用于判断交易类型
                 const wallet = await multiWalletStorage.getActiveWallet();
@@ -346,8 +337,9 @@ export default function TransactionsScreen() {
                 // 计算所有钱包地址的scriptPubKey集合
                 const allScriptPubKeys = new Set<string>();
                 for (const address of myAddresses) {
-                    if (typeof address === 'string') {
-                        allScriptPubKeys.add(calculateScriptPubKey(address));
+                    const scriptPubKey = calculateScriptPubKey(address);
+                    if (scriptPubKey) {
+                        allScriptPubKeys.add(scriptPubKey.toLowerCase());
                     }
                 }
 
@@ -358,7 +350,7 @@ export default function TransactionsScreen() {
                 // 计算总收入
                 if (txData.outputs) {
                     for (const output of txData.outputs) {
-                        if (allScriptPubKeys.has(output.scriptPubKey)) {
+                        if (allScriptPubKeys.has(String(output.scriptPubKey || '').toLowerCase())) {
                             totalReceived += output.value || 0;
                         }
                     }
@@ -367,7 +359,7 @@ export default function TransactionsScreen() {
                 // 计算总支出
                 if (txData.inputs) {
                     for (const input of txData.inputs) {
-                        if (input.output && input.output.scriptPubKey && allScriptPubKeys.has(input.output.scriptPubKey)) {
+                        if (input.output && input.output.scriptPubKey && allScriptPubKeys.has(String(input.output.scriptPubKey).toLowerCase())) {
                             totalSent += input.output.value || 0;
                         }
                     }
@@ -417,6 +409,9 @@ export default function TransactionsScreen() {
 
                 // 直接使用API返回的时间字符串
                 const txTimeStr = txData.timeStr || txData.timeString || '';
+                const txStatus = Number(txData.status);
+                const status: Transaction['status'] = txStatus === 3 ? 'failed' : txStatus === 2 ? 'completed' : 'pending';
+                const statusText = status === 'failed' ? '失败' : status === 'completed' ? '已完成' : '待确认';
 
                 console.log(`搜索交易 ${txData.txId}: 收入=${totalReceived}, 支出=${totalSent}, 净额=${netAmount}, 类型=${type}`);
 
@@ -428,8 +423,8 @@ export default function TransactionsScreen() {
                     amount: `${isReceive ? '+' : '-'} ${(finalAmount / 100000000).toFixed(8)} BTC`,
                     type,
                     icon,
-                    status: 'completed',
-                    statusText: '已完成',
+                    status,
+                    statusText,
                     isCoinbase, // 标记是否为coinbase交易
                     rawData: txData,
                     timestamp: txData.time, // 保存原始时间戳
@@ -500,6 +495,10 @@ export default function TransactionsScreen() {
     const totalPages = isLastPage ? currentPage : currentPage + 1;
 
     const goToTxDetail = (tx: Transaction) => {
+        if (/^[0-9a-f]{64}$/i.test(tx.txId)) {
+            router.push({ pathname: '/tx-detail', params: { txId: tx.txId } });
+            return;
+        }
         const txDataEncoded = encodeURIComponent(JSON.stringify(tx));
         router.push(`/tx-detail?txData=${txDataEncoded}`);
     };

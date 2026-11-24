@@ -5,8 +5,25 @@
 
 import { Platform, StatusBar, Dimensions } from 'react-native';
 
-const tintColorLight = '#1a1a1a';
-const tintColorDark = '#ffffff';
+const tintColorLight = '#F7931A';
+const tintColorDark = '#F7931A';
+
+export const Palette = {
+  ink: '#101828',
+  slate: '#667085',
+  muted: '#98A2B3',
+  line: '#EAECF0',
+  canvas: '#F8FAFC',
+  surface: '#FFFFFF',
+  accent: '#F7931A',
+  accentDark: '#D97706',
+  accentSoft: '#FFF3E0',
+  success: '#12B76A',
+  danger: '#F04438',
+  darkCanvas: '#0B1220',
+  darkSurface: '#111B2E',
+  darkLine: '#24324A',
+};
 
 export const statusBarHeight = StatusBar.currentHeight || Platform.select({
   ios: 0,
@@ -15,19 +32,19 @@ export const statusBarHeight = StatusBar.currentHeight || Platform.select({
 
 export const Colors = {
   light: {
-    text: '#1a1a1a',
-    background: '#ffffff',
+    text: Palette.ink,
+    background: Palette.canvas,
     tint: tintColorLight,
-    icon: '#8a8a8a',
-    tabIconDefault: '#8a8a8a',
+    icon: Palette.slate,
+    tabIconDefault: Palette.muted,
     tabIconSelected: tintColorLight,
   },
   dark: {
     text: '#ffffff',
-    background: '#0a0a0a',
+    background: Palette.darkCanvas,
     tint: tintColorDark,
-    icon: '#5a5a5a',
-    tabIconDefault: '#5a5a5a',
+    icon: '#98A2B3',
+    tabIconDefault: '#667085',
     tabIconSelected: tintColorDark,
   },
 };

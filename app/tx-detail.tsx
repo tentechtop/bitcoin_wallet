@@ -1,10 +1,11 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { statusBarHeight } from '@/constants/theme';
-import { Transaction } from '@/utils/blockchainApi';
+import { calculateScriptPubKey, formatTransactionList, getTransactionByHash, Transaction } from '@/utils/blockchainApi';
+import { multiWalletStorage, WalletAddress } from '@/utils/secureStorage';
 
 export default function TxDetailScreen() {
   const router = useRouter();
@@ -27,13 +28,29 @@ export default function TxDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.txId, params.txData]);
 
-  const loadTransactionDetail = (txId: string) => {
-    // TODO: 从存储中加载交易详情
-    // 目前简化处理，直接返回
-    Alert.alert('提示', '未找到交易记录');
-    setTimeout(() => {
-      router.back();
-    }, 1500);
+  const loadTransactionDetail = async (txId: string) => {
+    try {
+      const rawTransaction = await getTransactionByHash(txId);
+      if (!rawTransaction) {
+        throw new Error('未找到交易记录');
+      }
+
+      const wallet = await multiWalletStorage.getActiveWallet();
+      const walletScripts = new Set(
+        (wallet?.addresses || [])
+          .map((address: string | WalletAddress) => typeof address === 'string' ? address : address.address)
+          .map(calculateScriptPubKey)
+          .filter(Boolean),
+      );
+      const [formatted] = formatTransactionList([rawTransaction], walletScripts);
+      if (!formatted) {
+        throw new Error('交易数据格式错误');
+      }
+      setTransaction(formatted);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '加载交易失败';
+      Alert.alert('加载失败', message, [{ text: '返回', onPress: () => router.back() }]);
+    }
   };
 
   const getStatusColor = () => {
@@ -57,6 +74,8 @@ export default function TxDetailScreen() {
 
   const getStatusText = () => {
     if (!transaction) return '';
+    if (transaction.status === 'pending') return '等待确认';
+    if (transaction.status === 'failed') return '交易失败';
     if (transaction.type === 'receive') {
       return '接收成功';
     } else if (transaction.type === 'send') {
@@ -70,28 +89,21 @@ export default function TxDetailScreen() {
       try {
         await Clipboard.setStringAsync(transaction.txId);
         Alert.alert('成功', '交易ID已复制');
-      } catch (error) {
+      } catch {
         Alert.alert('错误', '复制失败');
       }
     }
   };
 
-  const copyAddress = async (address: string, label: string) => {
+  const shareTx = async () => {
+    if (!transaction?.txId) return;
     try {
-      await Clipboard.setStringAsync(address);
-      Alert.alert('成功', `${label}已复制`);
-    } catch (error) {
-      Alert.alert('错误', '复制失败');
+      await Share.share({
+        message: `Bitcoin 交易 ${transaction.txId}\n${transaction.amount}`,
+      });
+    } catch {
+      Alert.alert('分享失败', '请稍后重试');
     }
-  };
-
-  const viewOnBlockchain = () => {
-    Alert.alert('提示', '即将打开区块链浏览器');
-    // 实际应用中可以打开区块链浏览器链接
-  };
-
-  const shareTx = () => {
-    Alert.alert('提示', '分享功能开发中');
   };
 
   if (!transaction) {
@@ -190,11 +202,8 @@ export default function TxDetailScreen() {
 
         {/* 操作按钮 */}
         <View style={styles.actionSection}>
-          <TouchableOpacity style={styles.actionBtn} onPress={viewOnBlockchain}>
-            <Text style={styles.actionBtnText}>在区块链上查看</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, styles.actionBtnSecondary]} onPress={shareTx}>
-            <Text style={[styles.actionBtnText, styles.actionBtnTextSecondary]}>分享交易</Text>
+          <TouchableOpacity style={styles.actionBtn} onPress={shareTx}>
+            <Text style={styles.actionBtnText}>分享交易</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

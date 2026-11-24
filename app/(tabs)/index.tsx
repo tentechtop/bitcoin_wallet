@@ -1,31 +1,30 @@
-import { StyleSheet, TouchableOpacity, View, Modal, TextInput, ScrollView, Alert, Animated } from 'react-native';
+import { StyleSheet, TouchableOpacity, View, Modal, TextInput, ScrollView, Alert, Animated, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useRef, useEffect } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
-import { useRouter } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
 import { HDKey } from '@scure/bip32';
 import CryptoJS from 'crypto-js';
 import { Buffer } from 'buffer';
 
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
-import { statusBarHeight } from '@/constants/theme';
+import { Palette, statusBarHeight } from '@/constants/theme';
 import { multiWalletStorage, WalletAddress } from '@/utils/secureStorage';
 import {
   getWalletBalance,
   formatBTCBalance,
+  getTxListByAddress,
   getTxListByAddressInTxPool,
   calculateScriptPubKey,
   formatTransactionList,
   Transaction,
   queryUTXOByAddress,
   submitTransaction,
-  getAddressBalanceWithUTXO
+  getAddressBalanceWithUTXO,
+  selectUTXOs
 } from '@/utils/blockchainApi';
 
 export default function HomeScreen() {
@@ -38,6 +37,9 @@ export default function HomeScreen() {
   const [loadingBalance, setLoadingBalance] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
+  const [walletName, setWalletName] = useState('未选择钱包');
+  const [addressCount, setAddressCount] = useState(0);
+  const [showBalance, setShowBalance] = useState(true);
 
   const sendSlideAnim = useRef(new Animated.Value(500)).current;
   const receiveSlideAnim = useRef(new Animated.Value(500)).current;
@@ -53,6 +55,7 @@ export default function HomeScreen() {
     feeUnitIndex: 0,
     selectedAddressIndex: -1, // -1 表示自动选择，>=0 表示手动选择的地址索引
     senderAddress: '',
+    walletPassword: '',
     senderBalance: '0.00 BTC',
     addressList: [] as (string | WalletAddress)[],
     addressBalances: {} as { [key: number]: { availableBalance: number; utxoCount: number } },
@@ -88,12 +91,16 @@ export default function HomeScreen() {
       const wallet = await multiWalletStorage.getWalletById(walletId);
 
       if (!wallet || !wallet.addresses || wallet.addresses.length === 0) {
-        console.log('钱包没有地址');
+        setWalletName(wallet?.name || '未选择钱包');
+        setAddressCount(0);
         setTotalBalance(0);
         setAvailableBalance(0);
         setMaturingBalance(0);
         return;
       }
+
+      setWalletName(wallet.name || '我的钱包');
+      setAddressCount(wallet.addresses.length);
 
       // 查询钱包余额
       const balanceInfo = await getWalletBalance(wallet.addresses, 2);
@@ -133,7 +140,10 @@ export default function HomeScreen() {
       for (const addr of wallet.addresses) {
         const addressStr = typeof addr === 'string' ? addr : addr.address;
         if (typeof addressStr === 'string') {
-          allScriptPubKeys.add(calculateScriptPubKey(addressStr));
+          const scriptPubKey = calculateScriptPubKey(addressStr);
+          if (scriptPubKey) {
+            allScriptPubKeys.add(scriptPubKey.toLowerCase());
+          }
         }
       }
       console.log('钱包地址的scriptPubKey集合:', allScriptPubKeys);
@@ -152,13 +162,15 @@ export default function HomeScreen() {
 
           console.log('查询交易池 - 地址:', addressStr);
 
-          // 查询交易池
-          const txPoolData = await getTxListByAddressInTxPool(addressStr);
-          console.log('交易池查询结果:', txPoolData);
+          // 同时查询交易池和最近的已确认历史，确保首页显示真实链上记录。
+          const [txPoolData, historyResult] = await Promise.all([
+            getTxListByAddressInTxPool(addressStr),
+            getTxListByAddress(addressStr, 10, ''),
+          ]);
+          const rawTransactions = [...txPoolData, ...historyResult.data];
 
-          if (txPoolData && txPoolData.length > 0) {
-            // 格式化交易数据（传入所有地址的scriptPubKey集合）
-            const formattedTxs = formatTransactionList(txPoolData, allScriptPubKeys);
+          if (rawTransactions.length > 0) {
+            const formattedTxs = formatTransactionList(rawTransactions, allScriptPubKeys);
 
             // 去重（避免同一笔交易在多个地址中重复）
             for (const tx of formattedTxs) {
@@ -239,7 +251,7 @@ export default function HomeScreen() {
               utxoCount: result.availableUtxos.length
             };
           }
-        } catch (e) {
+        } catch {
           // 忽略单个地址查询失败
         }
       }
@@ -343,6 +355,7 @@ export default function HomeScreen() {
       feeUnitIndex: 0,
       selectedAddressIndex: -1,
       senderAddress: '',
+      walletPassword: '',
       senderBalance: '0.00 BTC',
       addressList: [],
       addressBalances: {},
@@ -374,29 +387,24 @@ export default function HomeScreen() {
   };
 
   const handleConfirmSend = async () => {
-    console.log('===== handleConfirmSend 被调用 =====');
-    console.log('sendData:', sendData);
+    if (!sendData.walletPassword) {
+      Alert.alert('提示', '请输入钱包密码以完成签名');
+      return;
+    }
 
     // 表单验证
     if (!sendData.toAddress) {
-      console.log('验证失败: 接收地址为空');
       Alert.alert('提示', '请输入接收地址');
       return;
     }
-    console.log('接收地址验证通过:', sendData.toAddress);
 
     if (!sendData.amount) {
-      console.log('验证失败: 发送金额为空');
       Alert.alert('提示', '请输入发送金额');
       return;
     }
-    console.log('发送金额验证通过:', sendData.amount);
 
-    const amountValue = parseFloat(sendData.amount);
-    console.log('解析金额值:', amountValue);
-
-    if (amountValue <= 0) {
-      console.log('验证失败: 金额必须大于0');
+    const amountValue = Number(sendData.amount.trim());
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
       Alert.alert('提示', '发送金额必须大于0');
       return;
     }
@@ -404,7 +412,6 @@ export default function HomeScreen() {
     // 获取当前币种单位和信息
     const coinUnit = getCoinUnitList(sendData.coinIndex);
     const selectedCoin = coinList[sendData.coinIndex];
-    console.log('币种:', selectedCoin.name, '单位列表:', coinUnit);
 
     // 转换为最小单位 (Satoshi for BTC)
     const decimalPlaces = 100000000;
@@ -414,18 +421,17 @@ export default function HomeScreen() {
     } else {
       amountInSmallestUnit = Math.floor(amountValue);
     }
-    console.log('转换为最小单位:', amountInSmallestUnit, 'satoshis');
-
+    if (!Number.isSafeInteger(amountInSmallestUnit) || amountInSmallestUnit <= 0) {
+      Alert.alert('提示', '发送金额超出可处理范围');
+      return;
+    }
     const amountInMainUnit = amountInSmallestUnit / decimalPlaces;
-    console.log('转换为主单位:', amountInMainUnit, 'BTC');
 
     // 处理手续费
     let feeInSmallestUnit: number;
     if (sendData.fee) {
-      const feeValue = parseFloat(sendData.fee);
-      console.log('解析手续费:', feeValue);
-      if (feeValue < 0) {
-        console.log('验证失败: 手续费不能为负数');
+      const feeValue = Number(sendData.fee.trim());
+      if (!Number.isFinite(feeValue) || feeValue < 0) {
         Alert.alert('提示', '手续费不能为负数');
         return;
       }
@@ -438,20 +444,25 @@ export default function HomeScreen() {
       // 默认手续费 0.0001 BTC
       feeInSmallestUnit = 10000;
     }
-    console.log('手续费(satoshis):', feeInSmallestUnit);
+
+    if (!Number.isSafeInteger(feeInSmallestUnit) || feeInSmallestUnit < 0) {
+      Alert.alert('提示', '手续费超出可处理范围');
+      return;
+    }
+    const targetScriptPubKey = calculateScriptPubKey(sendData.toAddress.trim());
+    if (!/^[0-9a-f]{40}$/.test(targetScriptPubKey)) {
+      Alert.alert('提示', '接收地址格式无效');
+      return;
+    }
 
     const feeInMainUnit = feeInSmallestUnit / decimalPlaces;
     const totalSmallestUnit = amountInSmallestUnit + feeInSmallestUnit;
     const totalInMainUnit = totalSmallestUnit / decimalPlaces;
 
-    console.log('总额(satoshis):', totalSmallestUnit);
-    console.log('总额(BTC):', totalInMainUnit);
 
     // 显示确认对话框
     const coinName = selectedCoin.name;
     const smallestUnitName = coinUnit[1];
-
-    console.log('准备显示确认对话框...');
 
     Alert.alert(
       '确认发送',
@@ -459,7 +470,6 @@ export default function HomeScreen() {
       [
         { text: '取消', style: 'cancel' },
         { text: '确认', onPress: () => {
-          console.log('用户点击了确认按钮');
           executeSend(amountInMainUnit, feeInMainUnit, amountInSmallestUnit, feeInSmallestUnit);
         }}
       ]
@@ -505,9 +515,12 @@ export default function HomeScreen() {
       console.log('派生路径:', pathStr);
 
       // 3. 派生密钥
-      // 使用空密码或固定密码解密种子
-      const password = '';
-      console.log('使用密码解密种子...');
+      const password = sendData.walletPassword;
+      const passwordValid = await multiWalletStorage.verifyWalletPassword(walletId, password);
+      if (!passwordValid) {
+        Alert.alert('错误', '钱包密码不正确');
+        return;
+      }
 
       const decryptedSeed = multiWalletStorage.decryptSeed(wallet.encryptedSeed, password);
       if (!decryptedSeed) {
@@ -515,11 +528,10 @@ export default function HomeScreen() {
         return;
       }
 
-      console.log('种子解密成功,长度:', decryptedSeed.length);
-
       const seedBuffer = Buffer.from(decryptedSeed, 'hex');
+      const derivationPath = pathStr || `m/44'/0'/0'/0/0`;
       const hdkey = HDKey.fromMasterSeed(seedBuffer);
-      const derivedKey = hdkey.derive(pathStr || `m/44'/0'/0'/0/0`);
+      const derivedKey = hdkey.derive(derivationPath);
       const privateKeyBytes = derivedKey.privateKey;
 
       if (!privateKeyBytes || privateKeyBytes.length !== 32) {
@@ -532,58 +544,35 @@ export default function HomeScreen() {
       const secretKeyBytes = keyPair.secretKey;
 
       const senderAddress = bs58.encode(publicKeyBytes);
-      console.log('发送方地址:', senderAddress);
-      console.log('公钥长度:', publicKeyBytes.length);
-      console.log('私钥长度:', secretKeyBytes.length);
-
+      if (senderAddress !== addressStr) {
+        throw new Error('地址缺少有效派生路径，请重新生成并保存该地址');
+      }
       // 4. 查询可花费的UTXO（使用新接口获取 availableBalanceUTXOList）
-      console.log('开始查询可花费UTXO...');
       const utxoList = await queryUTXOByAddress(senderAddress);
-
-      console.log('可花费UTXO查询结果:', utxoList?.length, '个');
 
       if (!utxoList || utxoList.length === 0) {
         Alert.alert('错误', '该地址没有可用的UTXO');
         return;
       }
 
-      // 4. 计算需要的UTXO
-      const totalNeeded = amountInSatoshis + feeInSatoshis;
-
-      console.log('需要总金额:', totalNeeded, 'satoshis');
-
-      let selectedUtxos: any[] = [];
-      let totalInput = 0;
-
-      // 选择UTXO（来自 availableBalanceUTXOList 的都是可花费的）
-      for (const utxo of utxoList) {
-        selectedUtxos.push(utxo);
-        totalInput += utxo.value;
-        if (totalInput >= totalNeeded) {
-          break;
-        }
-      }
-
-      console.log('选择的UTXO数量:', selectedUtxos.length);
-      console.log('输入总额:', totalInput, 'satoshis');
-
-      if (totalInput < totalNeeded) {
+      const selection = selectUTXOs(utxoList, amountInSatoshis, feeInSatoshis);
+      const selectedUtxos = selection.selected;
+      const totalInput = selection.total;
+      if (selectedUtxos.length === 0) {
         Alert.alert('错误', '余额不足');
         return;
       }
 
       // 5. 构建交易输出
       const outputs: any[] = [];
+      const totalNeeded = amountInSatoshis + feeInSatoshis;
       const change = totalInput - totalNeeded;
-
-      console.log('找零金额:', change, 'satoshis');
+      const targetScriptPubKey = calculateScriptPubKey(sendData.toAddress.trim());
+      if (!/^[0-9a-f]{40}$/.test(targetScriptPubKey)) {
+        throw new Error('接收地址格式无效');
+      }
 
       // 主输出：转账给目标地址
-      const targetScriptPubKey = calculateScriptPubKey(sendData.toAddress);
-      console.log('目标地址:', sendData.toAddress);
-      console.log('目标地址锁定脚本:', targetScriptPubKey);
-      console.log('目标地址锁定脚本长度:', targetScriptPubKey.length);
-
       outputs.push({
         value: amountInSatoshis,
         scriptPubKey: targetScriptPubKey
@@ -592,36 +581,24 @@ export default function HomeScreen() {
       // 找零输出
       if (change > 0) {
         const senderScriptPubKey = calculateScriptPubKey(senderAddress);
-        console.log('发送方scriptPubKey:', senderScriptPubKey);
-        console.log('发送方scriptPubKey长度:', senderScriptPubKey.length);
         outputs.push({
           value: change,
           scriptPubKey: senderScriptPubKey
         });
       }
 
-      console.log('交易输出数量:', outputs.length);
-
       // 6. 构建交易输入并签名每个输入
       const inputs: any[] = [];
       const SIGHASH_ALL = 0x01;
 
-      console.log('===== 开始构建交易输入并签名 =====');
-
       for (let i = 0; i < selectedUtxos.length; i++) {
-        console.log(`\n--- 处理第${i + 1}个输入 ---`);
         const utxo = selectedUtxos[i];
-        console.log('UTXO txId:', utxo.txId);
-        console.log('UTXO index:', utxo.index);
-        console.log('UTXO value:', utxo.value);
 
-        let currentUtxoScriptPubKey = utxo.script || utxo.scriptPubKey;
-        console.log('原始 scriptPubKey:', currentUtxoScriptPubKey);
+        let currentUtxoScriptPubKey = utxo.script;
 
         // 如果scriptPubKey不是40个字符（20字节的hex），需要计算
         if (currentUtxoScriptPubKey && currentUtxoScriptPubKey.length !== 40) {
           currentUtxoScriptPubKey = calculateScriptPubKey(currentUtxoScriptPubKey);
-          console.log('计算后的 scriptPubKey:', currentUtxoScriptPubKey);
         }
 
         // 构建签名消息
@@ -630,42 +607,39 @@ export default function HomeScreen() {
             return {
               txId: u.txId,
               index: u.index,
-              sequence: u.sequence || 0xFFFFFFFF,
+              sequence: 0xFFFFFFFF,
               scriptSig: currentUtxoScriptPubKey
             };
           } else {
             return {
               txId: u.txId,
               index: u.index,
-              sequence: u.sequence || 0xFFFFFFFF,
+              sequence: 0xFFFFFFFF,
               scriptSig: ''
             };
           }
         });
 
         const signatureMessage = prepareSigningData(i, originalInputs, outputs, SIGHASH_ALL);
-        console.log('签名消息长度:', signatureMessage.length);
 
         // 计算SHA256哈希
         const messageWordArray = CryptoJS.lib.WordArray.create(signatureMessage);
         const sha256Hash = CryptoJS.SHA256(messageWordArray);
-        console.log('SHA256哈希结果:', sha256Hash.toString(CryptoJS.enc.Hex));
 
         const hashBytes = hexToBytes(sha256Hash.toString(CryptoJS.enc.Hex));
         const hashUint8Array = new Uint8Array(hashBytes);
 
         // 使用Ed25519对哈希后的消息签名
         const signature = nacl.sign.detached(hashUint8Array, secretKeyBytes);
-        console.log('签名长度:', signature.length);
-        console.log('签名hex:', bufferToHex(signature));
 
         // 本地验证签名
         const isValid = nacl.sign.detached.verify(hashUint8Array, signature, publicKeyBytes);
-        console.log('本地签名验证结果:', isValid);
+        if (!isValid) {
+          throw new Error('本地签名校验失败');
+        }
 
         // 构建scriptSig: [64字节签名][1字节签名类型][32字节公钥]
         const scriptSig = buildScriptSig(signature, publicKeyBytes);
-        console.log('scriptSig长度:', scriptSig.length / 2, '字节');
 
         inputs.push({
           txId: utxo.txId,
@@ -674,10 +648,7 @@ export default function HomeScreen() {
           scriptSig: scriptSig
         });
 
-        console.log(`输入${i}处理完成\n`);
       }
-
-      console.log('===== 所有输入处理完成 =====');
 
       // 7. 构建TransferDTO并提交
       const transferData = {
@@ -687,31 +658,7 @@ export default function HomeScreen() {
         outputs: outputs
       };
 
-      console.log('===== 准备提交交易 =====');
-      console.log('版本号:', transferData.version);
-      console.log('锁定时间:', transferData.lockTime);
-      console.log('输入数量:', transferData.inputs.length);
-      transferData.inputs.forEach((input, idx) => {
-        console.log(`输入${idx}:`, {
-          txId: input.txId,
-          index: input.index,
-          scriptSig长度: input.scriptSig.length / 2,
-          scriptSig前缀: input.scriptSig.substring(0, 64) + '...'
-        });
-      });
-      console.log('输出数量:', transferData.outputs.length);
-      transferData.outputs.forEach((output, idx) => {
-        console.log(`输出${idx}:`, {
-          value: output.value,
-          scriptPubKey: output.scriptPubKey
-        });
-      });
-
-      console.log('提交交易数据:', JSON.stringify(transferData, null, 2));
-
       const result = await submitTransaction(transferData);
-
-      console.log('提交交易结果:', result);
 
       if (result && result.success) {
         // 刷新余额
@@ -879,16 +826,6 @@ export default function HomeScreen() {
     scriptSig.set(publicKey, 65);
 
     const hex = bufferToHex(scriptSig);
-    console.log('构建scriptSig:', {
-      签名长度: signature.length,
-      签名hex: bufferToHex(signature),
-      签名类型: '0x01 (SIGHASH_ALL)',
-      公钥长度: publicKey.length,
-      公钥hex: bufferToHex(publicKey),
-      scriptSig长度: scriptSig.length,
-      scriptSighex: hex
-    });
-
     return hex;
   };
 
@@ -972,180 +909,207 @@ export default function HomeScreen() {
     if (tx.id === 'empty') {
       return;
     }
-    // 将交易数据编码后传递
+    if (/^[0-9a-f]{64}$/i.test(tx.txId)) {
+      router.push({ pathname: '/tx-detail', params: { txId: tx.txId } });
+      return;
+    }
     const txDataEncoded = encodeURIComponent(JSON.stringify(tx));
     router.push(`/tx-detail?txData=${txDataEncoded}`);
   };
 
   return (
     <View style={styles.container}>
-      {/* 头部导航栏 */}
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <View style={styles.logo}>
-            <Ionicons name="wallet" size={20} color="#000000" />
-            <ThemedText style={styles.logoText}>Bitcoin WALLET</ThemedText>
-          </View>
+      <View style={styles.appBar}>
+        <View>
+          <ThemedText style={styles.appBarOverline}>BITCOIN WALLET</ThemedText>
+          <ThemedText style={styles.appBarTitle}>{walletName}</ThemedText>
         </View>
+        <TouchableOpacity
+          style={styles.appBarButton}
+          onPress={() => router.push('/wallet-management')}
+          accessibilityRole="button"
+          accessibilityLabel="打开钱包管理"
+        >
+          <Ionicons name="wallet-outline" size={20} color={Palette.ink} />
+        </TouchableOpacity>
       </View>
 
-      <ParallaxScrollView>
-      {/* 资产概览 */}
-      <ThemedView style={styles.assetsOverview}>
-        <ThemedText style={styles.sectionLabel}>总资产</ThemedText>
-        <ThemedText type="title" style={styles.totalBalance}>
-          {loadingBalance ? '加载中...' : `${formatBTCBalance(totalBalance)} BTC`}
-        </ThemedText>
-        
-        {!loadingBalance && (
-          <>
-            <View style={styles.balanceDetails}>
-              <View style={styles.balanceDetailItem}>
-                <ThemedText style={styles.balanceDetailLabel}>可用余额</ThemedText>
-                <ThemedText style={styles.balanceDetailValue}>
-                  {formatBTCBalance(availableBalance)} BTC
-                </ThemedText>
-              </View>
-              <View style={styles.balanceDetailItem}>
-                <ThemedText style={styles.balanceDetailLabel}>成熟中资产</ThemedText>
-                <ThemedText style={styles.balanceDetailValue}>
-                  {formatBTCBalance(maturingBalance)} BTC
-                </ThemedText>
-              </View>
+      <ScrollView
+        style={styles.dashboardScroll}
+        contentContainerStyle={styles.dashboardContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.heroCard}>
+          <View style={styles.heroTopRow}>
+            <View>
+              <ThemedText style={styles.heroLabel}>总资产</ThemedText>
+              <ThemedText style={styles.heroAmount}>
+                {loadingBalance
+                  ? '加载中…'
+                  : showBalance
+                    ? formatBTCBalance(totalBalance) + ' BTC'
+                    : '••••••••'}
+              </ThemedText>
+              <ThemedText style={styles.heroSubline}>
+                {loadingBalance ? '正在同步链上数据' : '余额以链上确认结果为准'}
+              </ThemedText>
             </View>
-            
-            <TouchableOpacity onPress={loadWalletBalance} style={styles.refreshBtn}>
-              <Ionicons name="refresh" size={16} color="#666666" />
+            <TouchableOpacity
+              style={styles.heroEyeButton}
+              onPress={() => setShowBalance(value => !value)}
+              accessibilityRole="button"
+              accessibilityLabel={showBalance ? '隐藏余额' : '显示余额'}
+            >
+              <Ionicons
+                name={showBalance ? 'eye-outline' : 'eye-off-outline'}
+                size={20}
+                color="#FFFFFF"
+              />
             </TouchableOpacity>
-          </>
-        )}
-      </ThemedView>
+          </View>
+          <View style={styles.heroStats}>
+            <View style={styles.heroStat}>
+              <ThemedText style={styles.heroStatLabel}>可用</ThemedText>
+              <ThemedText style={styles.heroStatValue}>
+                {showBalance ? formatBTCBalance(availableBalance) + ' BTC' : '••••'}
+              </ThemedText>
+            </View>
+            <View style={styles.heroDivider} />
+            <View style={styles.heroStat}>
+              <ThemedText style={styles.heroStatLabel}>成熟中</ThemedText>
+              <ThemedText style={styles.heroStatValue}>
+                {showBalance ? formatBTCBalance(maturingBalance) + ' BTC' : '••••'}
+              </ThemedText>
+            </View>
+            <TouchableOpacity
+              style={styles.heroRefresh}
+              onPress={loadWalletBalance}
+              disabled={loadingBalance}
+              accessibilityRole="button"
+              accessibilityLabel="刷新余额"
+            >
+              {loadingBalance ? (
+                <ActivityIndicator size="small" color="#F7931A" />
+              ) : (
+                <Ionicons name="refresh-outline" size={18} color="#F7931A" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
 
-      {/* 快速操作 */}
-      <ThemedView style={styles.quickActions}>
-        <TouchableOpacity style={styles.actionBtn} onPress={handleSendPress}>
-          <ThemedView style={styles.actionIconContainer}>
-            <Ionicons name="arrow-up" size={24} color="#000000" />
-          </ThemedView>
-          <ThemedText style={styles.actionText}>转账</ThemedText>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionBtn} onPress={handleReceivePress}>
-          <ThemedView style={styles.actionIconContainer}>
-            <Ionicons name="arrow-down" size={24} color="#000000" />
-          </ThemedView>
-          <ThemedText style={styles.actionText}>收款</ThemedText>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionBtn}>
-          <ThemedView style={styles.actionIconContainer}>
-            <Ionicons name="swap-horizontal" size={24} color="#000000" />
-          </ThemedView>
-          <ThemedText style={styles.actionText}>兑换</ThemedText>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionBtn}>
-          <ThemedView style={styles.actionIconContainer}>
-            <Ionicons name="grid" size={24} color="#000000" />
-          </ThemedView>
-          <ThemedText style={styles.actionText}>更多</ThemedText>
-        </TouchableOpacity>
-      </ThemedView>
-
-
-      {/* 最近交易 */}
-      <ThemedView style={styles.sectionContainer}>
-        <ThemedView style={styles.sectionHeader}>
-          <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>交易记录</ThemedText>
-          <TouchableOpacity onPress={loadTransactions}>
-            <Ionicons name="refresh" size={16} color="#666666" />
+        <View style={styles.actionsRow}>
+          <TouchableOpacity style={styles.primaryAction} onPress={handleSendPress}>
+            <View style={styles.actionIconAccent}>
+              <Ionicons name="arrow-up" size={20} color="#FFFFFF" />
+            </View>
+            <View>
+              <ThemedText style={styles.actionTitle}>发送</ThemedText>
+              <ThemedText style={styles.actionHint}>转出 BTC</ThemedText>
+            </View>
           </TouchableOpacity>
-        </ThemedView>
+          <TouchableOpacity style={styles.secondaryAction} onPress={handleReceivePress}>
+            <View style={styles.actionIconSoft}>
+              <Ionicons name="arrow-down" size={20} color={Palette.accentDark} />
+            </View>
+            <View>
+              <ThemedText style={styles.actionTitleDark}>接收</ThemedText>
+              <ThemedText style={styles.actionHintDark}>生成收款码</ThemedText>
+            </View>
+          </TouchableOpacity>
+        </View>
 
+        <View style={styles.sectionHeaderNew}>
+          <ThemedText style={styles.sectionTitleNew}>资产概览</ThemedText>
+          <TouchableOpacity onPress={() => router.push('/address-list')} accessibilityRole="button">
+            <ThemedText style={styles.sectionLink}>管理地址</ThemedText>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <View style={styles.statIconWrap}>
+              <Ionicons name="wallet-outline" size={18} color={Palette.accentDark} />
+            </View>
+            <ThemedText style={styles.statLabel}>钱包地址</ThemedText>
+            <ThemedText style={styles.statValue}>{addressCount || '—'}</ThemedText>
+          </View>
+          <View style={styles.statCard}>
+            <View style={[styles.statIconWrap, styles.statIconGreen]}>
+              <Ionicons name="layers-outline" size={18} color={Palette.success} />
+            </View>
+            <ThemedText style={styles.statLabel}>可用余额</ThemedText>
+            <ThemedText style={styles.statValue}>{showBalance ? formatBTCBalance(availableBalance) : '••••'}</ThemedText>
+          </View>
+        </View>
+
+        <View style={styles.sectionHeaderNew}>
+          <ThemedText style={styles.sectionTitleNew}>最近交易</ThemedText>
+          <TouchableOpacity onPress={() => router.push('/transactions')} accessibilityRole="button">
+            <ThemedText style={styles.sectionLink}>查看全部</ThemedText>
+          </TouchableOpacity>
+        </View>
         {loadingTransactions ? (
-          <ThemedView style={styles.emptyState}>
-            <ThemedText style={styles.emptyText}>加载中...</ThemedText>
-          </ThemedView>
+          <View style={styles.emptyCard}>
+            <ActivityIndicator color={Palette.accent} />
+            <ThemedText style={styles.emptySubtitle}>正在加载交易记录</ThemedText>
+          </View>
         ) : transactions.length === 0 || transactions[0].id === 'empty' ? (
-          <ThemedView style={styles.emptyState}>
-            <Ionicons name="document-text-outline" size={48} color="#888888" />
-            <ThemedText style={styles.emptyText}>暂无交易记录</ThemedText>
-            <ThemedText style={styles.emptySubtext}>开始使用钱包，记录您的第一笔交易</ThemedText>
-          </ThemedView>
+          <View style={styles.emptyCard}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="receipt-outline" size={24} color={Palette.muted} />
+            </View>
+            <ThemedText style={styles.emptyTitle}>还没有交易</ThemedText>
+            <ThemedText style={styles.emptySubtitle}>发送或接收 BTC 后，交易会显示在这里</ThemedText>
+          </View>
         ) : (
-          <View style={styles.transactionList}>
-            {transactions.map((tx) => {
-              const iconStyleKey = `transactionIcon${tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}`;
-              const statusStyleKey = `transaction${tx.status.charAt(0).toUpperCase() + tx.status.slice(1)}`;
-              const iconStyle = (styles as any)[iconStyleKey];
-              const statusStyle = (styles as any)[statusStyleKey];
-              return (
-                <TouchableOpacity
-                  key={tx.id}
-                  style={styles.transactionItem}
-                  onPress={() => handleTransactionPress(tx)}
-                  disabled={tx.id === 'empty'}
-                >
-                  <View style={styles.transactionLeft}>
-                    <View style={[styles.transactionIcon, iconStyle]}>
-                      <Ionicons
-                        name={tx.icon === 'arrow-up' ? 'arrow-up' : 'arrow-down' as any}
-                        size={16}
-                        color="#ffffff"
-                      />
-                    </View>
-                    <View style={styles.transactionDetails}>
-                      <ThemedText style={styles.transactionTitle}>{tx.title}</ThemedText>
-                      <ThemedText style={styles.transactionTime}>{tx.time}</ThemedText>
-                    </View>
-                  </View>
-                  <View style={styles.transactionRight}>
-                    <ThemedText style={[styles.transactionAmount, statusStyle]}>
-                      {tx.amount}
-                    </ThemedText>
-                    <ThemedText style={[styles.transactionStatus, statusStyle]}>
-                      {tx.statusText}
-                    </ThemedText>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+          <View style={styles.txList}>
+            {transactions.slice(0, 5).map((tx) => (
+              <TouchableOpacity key={tx.id} style={styles.txRow} onPress={() => handleTransactionPress(tx)} accessibilityRole="button">
+                <View style={[styles.txIcon, tx.type === 'receive' ? styles.txIconReceive : styles.txIconSend]}>
+                  <Ionicons name={tx.type === 'receive' ? 'arrow-down' : 'arrow-up'} size={16} color="#FFFFFF" />
+                </View>
+                <View style={styles.txCopy}>
+                  <ThemedText style={styles.txTitle} numberOfLines={1}>{tx.title}</ThemedText>
+                  <ThemedText style={styles.txTime}>{tx.time || '待确认'}</ThemedText>
+                </View>
+                <View style={styles.txAmount}>
+                  <ThemedText style={styles.txAmountText}>{tx.amount || '—'}</ThemedText>
+                  <ThemedText style={[styles.txStatus, tx.status === 'completed' && styles.txStatusSuccess]}>
+                    {tx.statusText || '处理中'}
+                  </ThemedText>
+                </View>
+              </TouchableOpacity>
+            ))}
           </View>
         )}
-      </ThemedView>
 
-      {/* 常用功能 */}
-      <ThemedView style={styles.sectionContainer}>
-        <ThemedText type="defaultSemiBold" style={styles.sectionTitle}>常用功能</ThemedText>
-        <ThemedView style={styles.featuresGrid}>
+        <View style={styles.sectionHeaderNew}>
+          <ThemedText style={styles.sectionTitleNew}>快捷入口</ThemedText>
+        </View>
+        <View style={styles.quickGrid}>
           <Link href="/wallet-management" asChild>
-            <TouchableOpacity style={styles.featureItem}>
-              <Ionicons name="wallet-outline" size={24} color="#333333" />
-              <ThemedText style={styles.featureText}>钱包管理</ThemedText>
+            <TouchableOpacity style={styles.quickItem}>
+              <View style={styles.quickIcon}><Ionicons name="wallet-outline" size={20} color={Palette.ink} /></View>
+              <ThemedText style={styles.quickLabel}>钱包管理</ThemedText>
             </TouchableOpacity>
           </Link>
-          <TouchableOpacity style={styles.featureItem}>
-            <Ionicons name="scan-outline" size={24} color="#333333" />
-            <ThemedText style={styles.featureText}>扫一扫</ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.featureItem}>
-            <Ionicons name="shield-checkmark-outline" size={24} color="#333333" />
-            <ThemedText style={styles.featureText}>安全设置</ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.featureItem}>
-            <Ionicons name="help-circle-outline" size={24} color="#333333" />
-            <ThemedText style={styles.featureText}>帮助中心</ThemedText>
-          </TouchableOpacity>
+          <Link href="/address-list" asChild>
+            <TouchableOpacity style={styles.quickItem}>
+              <View style={styles.quickIcon}><Ionicons name="qr-code-outline" size={20} color={Palette.ink} /></View>
+              <ThemedText style={styles.quickLabel}>收款地址</ThemedText>
+            </TouchableOpacity>
+          </Link>
           <Link href="/transactions" asChild>
-            <TouchableOpacity style={styles.featureItem}>
-              <Ionicons name="receipt-outline" size={24} color="#333333" />
-              <ThemedText style={styles.featureText}>交易历史</ThemedText>
+            <TouchableOpacity style={styles.quickItem}>
+              <View style={styles.quickIcon}><Ionicons name="list-outline" size={20} color={Palette.ink} /></View>
+              <ThemedText style={styles.quickLabel}>交易记录</ThemedText>
             </TouchableOpacity>
           </Link>
-          <TouchableOpacity style={styles.featureItem}>
-            <Ionicons name="settings-outline" size={24} color="#333333" />
-            <ThemedText style={styles.featureText}>系统设置</ThemedText>
+          <TouchableOpacity style={styles.quickItem} onPress={() => router.push('/wallet-management')}>
+            <View style={styles.quickIcon}><Ionicons name="settings-outline" size={20} color={Palette.ink} /></View>
+            <ThemedText style={styles.quickLabel}>安全设置</ThemedText>
           </TouchableOpacity>
-        </ThemedView>
-      </ThemedView>
-
+        </View>
+      </ScrollView>
       {/* 发送弹窗 */}
       <Modal
         visible={showSendModal}
@@ -1171,6 +1135,21 @@ export default function HomeScreen() {
 
             {/* 弹窗内容 */}
             <ScrollView style={styles.modalContent}>
+              <View style={styles.formItem}>
+                <ThemedText style={styles.formLabel}>钱包密码</ThemedText>
+                <TextInput
+                  style={styles.formInput}
+                  value={sendData.walletPassword}
+                  onChangeText={(walletPassword) => setSendData({ ...sendData, walletPassword })}
+                  placeholder="输入钱包密码以签名"
+                  placeholderTextColor="#98A2B3"
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <ThemedText style={styles.formHint}>密码只用于本次签名，不会发送到链上。</ThemedText>
+              </View>
+
               {/* 币种选择 */}
               <View style={styles.formItem}>
                 <ThemedText style={styles.formLabel}>币种</ThemedText>
@@ -1437,7 +1416,6 @@ export default function HomeScreen() {
         </Animated.View>
       </Modal>
 
-    </ParallaxScrollView>
     </View>
   );
 }
@@ -1445,7 +1423,46 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Palette.canvas,
+  },
+  appBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: statusBarHeight + 12,
+    paddingBottom: 14,
+    backgroundColor: Palette.canvas,
+  },
+  appBarOverline: {
+    fontSize: 11,
+    letterSpacing: 1.4,
+    color: Palette.slate,
+    fontWeight: '700',
+  },
+  appBarTitle: {
+    fontSize: 20,
+    lineHeight: 26,
+    color: Palette.ink,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  appBarButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Palette.surface,
+    borderWidth: 1,
+    borderColor: Palette.line,
+  },
+  dashboardScroll: {
+    flex: 1,
+  },
+  dashboardContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 32,
   },
   header: {
     backgroundColor: '#ffffff',
@@ -1721,6 +1738,312 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#000000',
+  },
+  heroCard: {
+    backgroundColor: Palette.darkSurface,
+    borderRadius: 24,
+    padding: 22,
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  heroLabel: {
+    color: '#B8C4D8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  heroAmount: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    lineHeight: 38,
+    fontWeight: '800',
+    marginTop: 8,
+    letterSpacing: 0.3,
+  },
+  heroSubline: {
+    color: '#8D9BB3',
+    fontSize: 12,
+    marginTop: 3,
+  },
+  heroEyeButton: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: '#1B2A43',
+  },
+  heroStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 22,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: Palette.darkLine,
+  },
+  heroStat: {
+    flex: 1,
+  },
+  heroStatLabel: {
+    color: '#8D9BB3',
+    fontSize: 12,
+    marginBottom: 5,
+  },
+  heroStatValue: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  heroDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: Palette.darkLine,
+    marginHorizontal: 14,
+  },
+  heroRefresh: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: '#1B2A43',
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 24,
+  },
+  primaryAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 78,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: Palette.accent,
+  },
+  secondaryAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 78,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: Palette.accentSoft,
+  },
+  actionIconAccent: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(16, 24, 40, 0.2)',
+  },
+  actionIconSoft: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  actionTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  actionHint: {
+    color: '#5D2B00',
+    fontSize: 11,
+    marginTop: 3,
+  },
+  actionTitleDark: {
+    color: Palette.ink,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  actionHintDark: {
+    color: Palette.slate,
+    fontSize: 11,
+    marginTop: 3,
+  },
+  sectionHeaderNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    marginTop: 2,
+  },
+  sectionTitleNew: {
+    color: Palette.ink,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  sectionLink: {
+    color: Palette.accentDark,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 24,
+  },
+  statCard: {
+    flex: 1,
+    minHeight: 118,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: Palette.surface,
+    borderWidth: 1,
+    borderColor: Palette.line,
+  },
+  statIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Palette.accentSoft,
+    marginBottom: 12,
+  },
+  statIconGreen: {
+    backgroundColor: '#E9F9F1',
+  },
+  statLabel: {
+    color: Palette.slate,
+    fontSize: 12,
+  },
+  statValue: {
+    color: Palette.ink,
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  emptyCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 142,
+    padding: 20,
+    borderRadius: 18,
+    backgroundColor: Palette.surface,
+    borderWidth: 1,
+    borderColor: Palette.line,
+    marginBottom: 24,
+  },
+  emptyIcon: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    backgroundColor: Palette.canvas,
+    marginBottom: 10,
+  },
+  emptyTitle: {
+    color: Palette.ink,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  emptySubtitle: {
+    color: Palette.slate,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 5,
+  },
+  txList: {
+    backgroundColor: Palette.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Palette.line,
+    marginBottom: 24,
+    overflow: 'hidden',
+  },
+  txRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Palette.line,
+  },
+  txIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  txIconReceive: {
+    backgroundColor: Palette.success,
+  },
+  txIconSend: {
+    backgroundColor: Palette.danger,
+  },
+  txCopy: {
+    flex: 1,
+  },
+  txTitle: {
+    color: Palette.ink,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  txTime: {
+    color: Palette.muted,
+    fontSize: 11,
+    marginTop: 4,
+  },
+  txAmount: {
+    alignItems: 'flex-end',
+    marginLeft: 8,
+  },
+  txAmountText: {
+    color: Palette.ink,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  txStatus: {
+    color: Palette.slate,
+    fontSize: 11,
+    marginTop: 4,
+  },
+  txStatusSuccess: {
+    color: Palette.success,
+  },
+  quickGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  quickItem: {
+    width: '48%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 13,
+    borderRadius: 16,
+    backgroundColor: Palette.surface,
+    borderWidth: 1,
+    borderColor: Palette.line,
+  },
+  quickIcon: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 11,
+    backgroundColor: Palette.canvas,
+    marginRight: 9,
+  },
+  quickLabel: {
+    color: Palette.ink,
+    fontSize: 12,
+    fontWeight: '700',
   },
   // 弹窗样式
   modalOverlay: {

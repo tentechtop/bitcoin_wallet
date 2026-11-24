@@ -127,10 +127,14 @@ export default function AddressListScreen() {
             const walletData = await multiWalletStorage.getWalletById(walletId);
             if (walletData) {
                 const updatedAddresses = walletData.addresses.filter((_: any, i: number) => i !== selectedAddressIndex);
-                await multiWalletStorage.updateWallet(walletId, { addresses: updatedAddresses });
+                const updatedWallet = await multiWalletStorage.updateWallet(walletId, { addresses: updatedAddresses });
+                if (!updatedWallet) {
+                    throw new Error('地址更新失败');
+                }
 
                 // 重新加载地址列表
-                loadAddresses(walletData);
+                setWallet(updatedWallet);
+                loadAddresses(updatedWallet);
 
                 Alert.alert('成功', '地址已删除');
                 setDeleteModalVisible(false);
