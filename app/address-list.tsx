@@ -163,6 +163,13 @@ export default function AddressListScreen() {
         }
     };
 
+    const closePrivateKeyModal = () => {
+        setPrivateKeyModalVisible(false);
+        setPrivateKeyPassword('');
+        setRevealedPrivateKey('');
+        setPrivateKeyIndex(null);
+    };
+
     const handleDeleteAddress = (index: number) => {
         setSelectedAddressIndex(index);
         setDeletePassword('');
@@ -391,7 +398,7 @@ export default function AddressListScreen() {
                 visible={privateKeyModalVisible}
                 transparent
                 animationType="fade"
-                onRequestClose={() => setPrivateKeyModalVisible(false)}
+                onRequestClose={closePrivateKeyModal}
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
@@ -411,7 +418,7 @@ export default function AddressListScreen() {
                                 <View style={styles.modalButtons}>
                                     <TouchableOpacity
                                         style={[styles.modalButton, styles.cancelButton]}
-                                        onPress={() => setPrivateKeyModalVisible(false)}
+                                        onPress={closePrivateKeyModal}
                                         disabled={revealingPrivateKey}
                                     >
                                         <Text style={styles.cancelButtonText}>取消</Text>
@@ -429,7 +436,7 @@ export default function AddressListScreen() {
                             <>
                                 <Text style={styles.revealedPrivateKey} selectable>{revealedPrivateKey}</Text>
                                 <View style={styles.modalButtons}>
-                                    <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => setPrivateKeyModalVisible(false)}>
+                                    <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closePrivateKeyModal}>
                                         <Text style={styles.cancelButtonText}>关闭</Text>
                                     </TouchableOpacity>
                                     <TouchableOpacity style={[styles.modalButton, styles.confirmButton]} onPress={copyRevealedPrivateKey}>
