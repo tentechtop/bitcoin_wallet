@@ -641,6 +641,10 @@ export function calculateScriptPubKey(base58Address: string): string {
 
     // 1. Base58 解码
     const decoded = bs58.decode(base58Address);
+    if (decoded.length !== 32) {
+      console.error('地址公钥长度无效:', decoded.length);
+      return '';
+    }
 
     // 2. 转换为 WordArray
     const wordArray = CryptoJS.lib.WordArray.create(decoded);
