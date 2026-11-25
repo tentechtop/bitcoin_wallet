@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, TouchableOpacity, TextInput, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, TextInput, ScrollView, ActivityIndicator, useWindowDimensions, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -445,12 +445,12 @@ export default function TransactionsScreen() {
             } else {
                 console.log('未找到交易');
                 setSearchResult(null);
-                alert('未找到该交易ID');
+                Alert.alert('未找到交易', '未找到该交易ID');
             }
         } catch (error: any) {
             console.error('搜索交易失败:', error?.message || error);
             setSearchResult(null);
-            alert('搜索失败: ' + (error?.response?.data?.message || error?.message || '未知错误'));
+            Alert.alert('搜索失败', error?.response?.data?.message || error?.message || '未知错误');
         } finally {
             setLoading(false);
         }
