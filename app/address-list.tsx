@@ -127,7 +127,8 @@ export default function AddressListScreen() {
             const walletData = await multiWalletStorage.getWalletById(walletId);
             if (walletData) {
                 const updatedAddresses = walletData.addresses.filter((_: any, i: number) => i !== selectedAddressIndex);
-                const updatedWallet = await multiWalletStorage.updateWallet(walletId, { addresses: updatedAddresses });
+                // 传入已验证的密码，让旧格式的明文私钥在更新地址列表时一并迁移为加密字段。
+                const updatedWallet = await multiWalletStorage.updateWallet(walletId, { addresses: updatedAddresses }, deletePassword);
                 if (!updatedWallet) {
                     throw new Error('地址更新失败');
                 }

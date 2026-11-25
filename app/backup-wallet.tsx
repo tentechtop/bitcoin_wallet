@@ -37,6 +37,9 @@ export default function BackupWalletScreen() {
       }
       setMnemonic(decrypted);
       setRevealed(false);
+    } catch (error) {
+      console.error('解锁备份失败:', error);
+      Alert.alert('无法解锁', error instanceof Error ? error.message : '读取钱包数据失败，请稍后重试');
     } finally {
       setLoading(false);
     }

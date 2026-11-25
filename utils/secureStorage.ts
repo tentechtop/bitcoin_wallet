@@ -168,6 +168,11 @@ function normalizeAddress(address: string | WalletAddress, password?: string, co
     normalized.encryptedPrivateKey = context
       ? encryptWithContext(address.privateKey, context)
       : encrypt(address.privateKey, password);
+  } else if (address.privateKey) {
+    // A password is unavailable while loading the wallet list. Preserve the
+    // legacy key in memory so the unlock flow can encrypt it before writing.
+    // Do not persist this shape from getWallets (see the migration guard below).
+    normalized.privateKey = address.privateKey;
   }
   return normalized;
 }
@@ -175,6 +180,12 @@ function normalizeAddress(address: string | WalletAddress, password?: string, co
 function normalizeAddresses(addresses: unknown, password?: string, context?: EncryptionContext): (string | WalletAddress)[] {
   if (!Array.isArray(addresses)) return [];
   return addresses.map(address => normalizeAddress(address as string | WalletAddress, password, context)).filter(address => address !== '');
+}
+
+function containsLegacyPlaintextPrivateKey(wallets: Wallet[]): boolean {
+  return wallets.some(wallet => wallet.addresses.some(address =>
+    typeof address !== 'string' && typeof address.privateKey === 'string' && address.privateKey.length > 0 && !address.encryptedPrivateKey
+  ));
 }
 
 function normalizeWallet(wallet: Partial<Wallet>): Wallet | null {
@@ -215,10 +226,10 @@ export const multiWalletStorage = {
       const parsed: unknown = JSON.parse(data);
       if (!Array.isArray(parsed)) return [];
       const wallets = parsed.map(wallet => normalizeWallet(wallet as Partial<Wallet>)).filter((wallet): wallet is Wallet => wallet !== null);
-      // Strip legacy plaintext address private keys on first read. This is a
-      // one-way migration because no password is available at list-loading time.
+      // Normalize legacy records on first read. Records containing plaintext
+      // address keys stay untouched until the unlock flow can encrypt them.
       const normalizedData = JSON.stringify(wallets);
-      if (normalizedData !== data) {
+      if (normalizedData !== data && !containsLegacyPlaintextPrivateKey(wallets)) {
         try { await storage.setItemAsync(WALLETS_STORAGE_KEY, normalizedData); }
         catch (error) { console.error('迁移钱包数据失败:', error); }
       }
@@ -353,8 +364,15 @@ export const multiWalletStorage = {
     try {
       const wallets = await this.getWallets();
       if (!wallets.some(wallet => wallet.id === walletId)) return false;
-      await storage.setItemAsync(WALLETS_STORAGE_KEY, JSON.stringify(wallets.filter(wallet => wallet.id !== walletId)));
-      if ((await this.getActiveWalletId()) === walletId) await this.clearActiveWallet();
+      const remainingWallets = wallets.filter(wallet => wallet.id !== walletId);
+      await storage.setItemAsync(WALLETS_STORAGE_KEY, JSON.stringify(remainingWallets));
+      if ((await this.getActiveWalletId()) === walletId) {
+        if (remainingWallets.length > 0) {
+          await storage.setItemAsync(ACTIVE_WALLET_KEY, remainingWallets[0].id);
+        } else {
+          await this.clearActiveWallet();
+        }
+      }
       return true;
     } catch (error) { console.error('删除钱包失败:', error); return false; }
   },

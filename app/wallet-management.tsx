@@ -1,15 +1,18 @@
-import { useState } from 'react';
-import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { multiWalletStorage, Wallet } from '@/utils/secureStorage';
 import { router, useFocusEffect } from 'expo-router';
-import { getWalletBalance, formatBTCBalance } from '@/utils/blockchainApi';
+import { getWalletBalance } from '@/utils/blockchainApi';
 
 export default function WalletManagementScreen() {
     const [wallets, setWallets] = useState<Wallet[]>([]);
     const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshingWalletId, setRefreshingWalletId] = useState<string | null>(null);
+    const [walletToDelete, setWalletToDelete] = useState<Wallet | null>(null);
+    const [deletePassword, setDeletePassword] = useState('');
+    const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
     // 使用 useFocusEffect 在页面聚焦时刷新
     useFocusEffect(
@@ -37,12 +40,13 @@ export default function WalletManagementScreen() {
 
     const handleSetActiveWallet = async (walletId: string) => {
         try {
-            await multiWalletStorage.setActiveWalletId(walletId);
+            const success = await multiWalletStorage.setActiveWalletId(walletId);
+            if (!success) throw new Error('钱包不存在或保存失败');
             setActiveWalletId(walletId);
             Alert.alert('成功', '已切换激活钱包');
         } catch (error) {
             console.error('设置激活钱包失败:', error);
-            Alert.alert('错误', '设置激活钱包失败');
+            Alert.alert('错误', error instanceof Error ? error.message : '设置激活钱包失败');
         }
     };
 
@@ -84,23 +88,44 @@ export default function WalletManagementScreen() {
                 {
                     text: '删除',
                     style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            const success = await multiWalletStorage.deleteWallet(wallet.id);
-                            if (success) {
-                                Alert.alert('成功', '钱包已删除');
-                                loadWallets();
-                            } else {
-                                Alert.alert('错误', '删除钱包失败');
-                            }
-                        } catch (error) {
-                            console.error('删除钱包失败:', error);
-                            Alert.alert('错误', '删除钱包失败');
-                        }
+                    onPress: () => {
+                        setWalletToDelete(wallet);
+                        setDeletePassword('');
+                        setDeleteModalVisible(true);
                     }
                 }
             ]
         );
+    };
+
+    const confirmDeleteWallet = async () => {
+        if (!walletToDelete || !deletePassword) {
+            Alert.alert('提示', '请输入钱包密码');
+            return;
+        }
+
+        setDeleting(true);
+        try {
+            const valid = await multiWalletStorage.verifyWalletPassword(walletToDelete.id, deletePassword);
+            if (!valid) {
+                Alert.alert('无法删除', '钱包密码不正确');
+                setDeletePassword('');
+                return;
+            }
+
+            const success = await multiWalletStorage.deleteWallet(walletToDelete.id);
+            if (!success) throw new Error('删除钱包失败');
+            setDeleteModalVisible(false);
+            setWalletToDelete(null);
+            setDeletePassword('');
+            Alert.alert('成功', '钱包已删除');
+            await loadWallets();
+        } catch (error) {
+            console.error('删除钱包失败:', error);
+            Alert.alert('错误', error instanceof Error ? error.message : '删除钱包失败');
+        } finally {
+            setDeleting(false);
+        }
     };
 
     const formatBalance = (balance: number) => {
@@ -249,6 +274,49 @@ export default function WalletManagementScreen() {
                     ))}
                 </ScrollView>
             )}
+
+            <Modal
+                visible={deleteModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => {
+                    if (!deleting) setDeleteModalVisible(false);
+                }}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>验证钱包密码</Text>
+                        <Text style={styles.modalMessage}>删除钱包前请输入密码。删除后无法恢复本机数据。</Text>
+                        <TextInput
+                            style={styles.passwordInput}
+                            value={deletePassword}
+                            onChangeText={setDeletePassword}
+                            placeholder="请输入钱包密码"
+                            placeholderTextColor="#999"
+                            secureTextEntry
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                            editable={!deleting}
+                        />
+                        <View style={styles.modalButtons}>
+                            <TouchableOpacity
+                                style={[styles.modalButton, styles.cancelButton]}
+                                onPress={() => setDeleteModalVisible(false)}
+                                disabled={deleting}
+                            >
+                                <Text style={styles.cancelButtonText}>取消</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.modalButton, styles.confirmDeleteButton]}
+                                onPress={confirmDeleteWallet}
+                                disabled={deleting}
+                            >
+                                {deleting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.confirmDeleteButtonText}>确认删除</Text>}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -426,5 +494,60 @@ const styles = StyleSheet.create({
     },
     deleteButtonText: {
         color: '#FFFFFF',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        justifyContent: 'center',
+        padding: 24,
+    },
+    modalContent: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 20,
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        marginBottom: 8,
+    },
+    modalMessage: {
+        color: '#666666',
+        lineHeight: 20,
+        marginBottom: 14,
+    },
+    passwordInput: {
+        height: 48,
+        borderWidth: 1,
+        borderColor: '#D0D0D0',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        color: '#111111',
+    },
+    modalButtons: {
+        flexDirection: 'row',
+        gap: 10,
+        marginTop: 16,
+    },
+    modalButton: {
+        flex: 1,
+        minHeight: 44,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    cancelButton: {
+        backgroundColor: '#F0F0F0',
+    },
+    cancelButtonText: {
+        color: '#333333',
+        fontWeight: '600',
+    },
+    confirmDeleteButton: {
+        backgroundColor: '#D92D20',
+    },
+    confirmDeleteButtonText: {
+        color: '#FFFFFF',
+        fontWeight: '700',
     },
 });

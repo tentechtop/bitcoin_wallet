@@ -8,6 +8,7 @@ import * as Clipboard from 'expo-clipboard';
 import bs58 from 'bs58';
 import * as nacl from 'tweetnacl';
 import QRCode from 'react-native-qrcode-svg';
+import { Buffer } from 'buffer';
 
 
 interface WalletAddress {
@@ -15,6 +16,13 @@ interface WalletAddress {
     address: string;
     publicKey: string;
     privateKey: string;
+}
+
+function parseNonNegativeIndex(value: string): number | null {
+    const normalized = value.trim();
+    if (!/^\d+$/.test(normalized)) return null;
+    const parsed = Number(normalized);
+    return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 export default function CreateAddressScreen() {
@@ -117,9 +125,9 @@ export default function CreateAddressScreen() {
             }
 
             // 账户索引和地址索引
-            const accountIdx = Number.parseInt(accountIndex, 10);
-            const addressIdx = Number.parseInt(addressIndex, 10);
-            if (!Number.isInteger(accountIdx) || accountIdx < 0 || !Number.isInteger(addressIdx) || addressIdx < 0) {
+            const accountIdx = parseNonNegativeIndex(accountIndex);
+            const addressIdx = parseNonNegativeIndex(addressIndex);
+            if (accountIdx === null || addressIdx === null) {
                 Alert.alert('提示', '账户索引和地址索引必须是非负整数');
                 return;
             }
@@ -200,6 +208,14 @@ export default function CreateAddressScreen() {
                 return;
             }
 
+            // 地址私钥会在 updateWallet 中用 walletPassword 加密。再次校验密码，
+            // 防止用户生成地址后修改输入框内容，导致私钥被错误密码加密而无法恢复。
+            const passwordValid = await multiWalletStorage.verifyWalletPassword(walletId, walletPassword);
+            if (!passwordValid) {
+                Alert.alert('错误', '钱包密码不正确，无法保存地址');
+                return;
+            }
+
             // 检查地址是否已存在
             const addressExists = wallet.addresses.some(addr => {
                 if (typeof addr === 'string') {
@@ -214,15 +230,21 @@ export default function CreateAddressScreen() {
             }
 
             // 检查账户索引和地址索引组合是否已存在
-            const accountIdx = parseInt(accountIndex) || 0;
-            const addressIdx = parseInt(addressIndex) || 0;
+            const accountIdx = parseNonNegativeIndex(accountIndex);
+            const addressIdx = parseNonNegativeIndex(addressIndex);
+            if (accountIdx === null || addressIdx === null) {
+                Alert.alert('提示', '账户索引和地址索引必须是非负整数');
+                return;
+            }
 
             const indexExists = wallet.addresses.some(addr => {
                 if (typeof addr === 'string') {
                     return false; // 旧格式数据无法检查索引
                 }
-                const existingAccountIdx = parseInt(addr.path.split('/')[3].replace("'", ''));
-                const existingAddressIdx = parseInt(addr.path.split('/')[4]);
+                const pathMatch = /^m\/44'\/0\/(\d+)'\/0\/(\d+)$/.exec(addr.path);
+                if (!pathMatch) return false;
+                const existingAccountIdx = Number(pathMatch[1]);
+                const existingAddressIdx = Number(pathMatch[2]);
                 return existingAccountIdx === accountIdx && existingAddressIdx === addressIdx;
             });
 

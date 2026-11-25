@@ -21,7 +21,10 @@ export function validateApiBaseUrl(input: string): ApiUrlValidation {
     return { valid: false, error: '节点地址必须是完整 URL，例如 https://node.example.com/bitcoin/chain' };
   }
 
-  const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+  // 10.0.2.2 is the Android emulator's host-loopback alias. It is local
+  // development traffic and must remain usable with the cleartext exception
+  // declared in the native network security config.
+  const localHost = ['localhost', '127.0.0.1', '10.0.2.2', '[::1]'].includes(parsed.hostname);
   if (parsed.protocol !== 'https:' && !(localHost && parsed.protocol === 'http:')) {
     return { valid: false, error: '远程节点必须使用 HTTPS' };
   }
