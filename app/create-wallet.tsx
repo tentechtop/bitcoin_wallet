@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert, Platform } from 'react-native';
 import { Palette, statusBarHeight } from '@/constants/theme';
 import { multiWalletStorage } from '@/utils/secureStorage';
 import * as bip39 from 'bip39';
@@ -82,6 +82,14 @@ export default function CreateWalletScreen() {
   };
 
   const handleClearMnemonic = () => {
+    if (Platform.OS === 'web') {
+      if (window.confirm('确定要清除助记词吗？')) {
+        setMnemonic('');
+        setInputMnemonic('');
+      }
+      return;
+    }
+
     Alert.alert(
       '清除确认',
       '确定要清除助记词吗？',
