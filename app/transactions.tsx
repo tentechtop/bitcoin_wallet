@@ -19,6 +19,7 @@ export default function TransactionsScreen() {
     const [pageKeys, setPageKeys] = useState<string[]>(['']); // 存储每一页的lastKey,索引0是第一页('')
     const [isLastPage, setIsLastPage] = useState(false);
     const [totalTransactions, setTotalTransactions] = useState(0);
+    const [jumpingToLastPage, setJumpingToLastPage] = useState(false);
 
     useFocusEffect(
         useCallback(() => {
@@ -33,6 +34,7 @@ export default function TransactionsScreen() {
         setPageKeys(['']);
         setIsLastPage(false);
         setTotalTransactions(0);
+        setJumpingToLastPage(false);
     };
 
     // 当页码变化时重新加载
@@ -41,6 +43,15 @@ export default function TransactionsScreen() {
             loadTransactions();
         }
     }, [currentPage]);
+
+    useEffect(() => {
+        if (!jumpingToLastPage || loading) return;
+        if (isLastPage) {
+            setJumpingToLastPage(false);
+            return;
+        }
+        setCurrentPage(page => page + 1);
+    }, [jumpingToLastPage, loading, isLastPage]);
 
     const loadTransactions = async () => {
         try {
@@ -482,11 +493,7 @@ export default function TransactionsScreen() {
 
     // 末页（跳转到最后一页）
     const goToLastPage = () => {
-        if (!isLastPage) {
-            // 由于不知道总页数，这里先保持当前页
-            // 用户可以点击"下一页"直到最后一页
-            console.log('跳转到最后一页');
-        }
+        if (!isLastPage && !loading) setJumpingToLastPage(true);
     };
 
     // 显示的交易（服务端已分页，直接显示）
@@ -677,9 +684,9 @@ export default function TransactionsScreen() {
                                 <TouchableOpacity
                                     style={[styles.pageButton, isLastPage && styles.pageButtonDisabled]}
                                     onPress={goToLastPage}
-                                    disabled={isLastPage}
+                                    disabled={isLastPage || loading || jumpingToLastPage}
                                 >
-                                    <Text style={[styles.pageButtonText, isLastPage && styles.pageButtonTextDisabled]}>末页</Text>
+                                    <Text style={[styles.pageButtonText, (isLastPage || loading || jumpingToLastPage) && styles.pageButtonTextDisabled]}>{jumpingToLastPage ? '跳转中' : '末页'}</Text>
                                 </TouchableOpacity>
                             </View>
                         )}
