@@ -271,6 +271,10 @@ export const multiWalletStorage = {
       const index = wallets.findIndex(wallet => wallet.id === walletId);
       if (index < 0) return null;
       const current = wallets[index];
+      // Legacy records can expose plaintext address keys in memory while they
+      // wait for an unlock flow to encrypt them. An update without the wallet
+      // password must never serialize that temporary shape back to storage.
+      if (password === undefined && containsLegacyPlaintextPrivateKey([current])) return null;
       const encryptionContext = password !== undefined && typeof password === 'string'
         ? createEncryptionContext(password)
         : undefined;
