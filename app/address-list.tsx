@@ -11,6 +11,7 @@ interface WalletAddress {
     address: string;
     publicKey: string;
     privateKey: string;
+    encryptedPrivateKey?: string;
 }
 
 export default function AddressListScreen() {
@@ -24,6 +25,11 @@ export default function AddressListScreen() {
     const [addressBalances, setAddressBalances] = useState<{ [key: number]: { balance: number; availableBalance: number; maturingBalance: number; utxoCount: number } }>({});
     const [loadingAddressIndex, setLoadingAddressIndex] = useState<number | null>(null);
     const [deletingAddress, setDeletingAddress] = useState(false);
+    const [privateKeyModalVisible, setPrivateKeyModalVisible] = useState(false);
+    const [privateKeyPassword, setPrivateKeyPassword] = useState('');
+    const [privateKeyIndex, setPrivateKeyIndex] = useState<number | null>(null);
+    const [revealedPrivateKey, setRevealedPrivateKey] = useState('');
+    const [revealingPrivateKey, setRevealingPrivateKey] = useState(false);
 
     useEffect(() => {
         if (walletId) {
@@ -106,6 +112,54 @@ export default function AddressListScreen() {
             Alert.alert('错误', '查询余额失败');
         } finally {
             setLoadingAddressIndex(null);
+        }
+    };
+
+    const handleViewPrivateKey = (index: number) => {
+        setPrivateKeyIndex(index);
+        setPrivateKeyPassword('');
+        setRevealedPrivateKey('');
+        setPrivateKeyModalVisible(true);
+    };
+
+    const revealPrivateKey = async () => {
+        if (!walletId || privateKeyIndex === null || !privateKeyPassword) {
+            Alert.alert('提示', '请输入钱包密码');
+            return;
+        }
+
+        setRevealingPrivateKey(true);
+        try {
+            const valid = await multiWalletStorage.verifyWalletPassword(walletId, privateKeyPassword);
+            if (!valid) {
+                Alert.alert('无法查看', '钱包密码不正确');
+                return;
+            }
+
+            const walletData = await multiWalletStorage.getWalletById(walletId);
+            const address = walletData?.addresses[privateKeyIndex];
+            if (!address || typeof address === 'string') throw new Error('地址私钥不存在');
+            const privateKey = address.encryptedPrivateKey
+                ? multiWalletStorage.decryptPrivateKey(address.encryptedPrivateKey, privateKeyPassword)
+                : address.privateKey;
+            if (!privateKey) throw new Error('地址私钥解密失败');
+            setRevealedPrivateKey(privateKey);
+        } catch (error) {
+            console.error('查看私钥失败:', error);
+            Alert.alert('无法查看', error instanceof Error ? error.message : '地址私钥解密失败');
+        } finally {
+            setRevealingPrivateKey(false);
+        }
+    };
+
+    const copyRevealedPrivateKey = async () => {
+        if (!revealedPrivateKey) return;
+        try {
+            await Clipboard.setStringAsync(revealedPrivateKey);
+            Alert.alert('已复制', '私钥已复制，请在使用后清理剪贴板');
+        } catch (error) {
+            console.error('复制私钥失败:', error);
+            Alert.alert('复制失败', '无法写入剪贴板');
         }
     };
 
@@ -268,6 +322,15 @@ export default function AddressListScreen() {
                                 </View>
                             )}
 
+                            {!addr.privateKey && addr.encryptedPrivateKey && (
+                                <TouchableOpacity
+                                    style={styles.viewPrivateKeyButton}
+                                    onPress={() => handleViewPrivateKey(index)}
+                                >
+                                    <Text style={styles.viewPrivateKeyText}>验证密码查看私钥</Text>
+                                </TouchableOpacity>
+                            )}
+
                             <TouchableOpacity
                                 style={styles.deleteButton}
                                 onPress={() => handleDeleteAddress(index)}
@@ -320,6 +383,61 @@ export default function AddressListScreen() {
                                 {deletingAddress ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.confirmButtonText}>确认删除</Text>}
                             </TouchableOpacity>
                         </View>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
+                visible={privateKeyModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setPrivateKeyModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>查看地址私钥</Text>
+                        <Text style={styles.modalMessage}>输入钱包密码后临时解密私钥。使用后请清理剪贴板。</Text>
+                        {!revealedPrivateKey ? (
+                            <>
+                                <TextInput
+                                    style={styles.passwordInput}
+                                    placeholder="请输入钱包密码"
+                                    placeholderTextColor="#999"
+                                    secureTextEntry
+                                    value={privateKeyPassword}
+                                    onChangeText={setPrivateKeyPassword}
+                                    editable={!revealingPrivateKey}
+                                />
+                                <View style={styles.modalButtons}>
+                                    <TouchableOpacity
+                                        style={[styles.modalButton, styles.cancelButton]}
+                                        onPress={() => setPrivateKeyModalVisible(false)}
+                                        disabled={revealingPrivateKey}
+                                    >
+                                        <Text style={styles.cancelButtonText}>取消</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[styles.modalButton, styles.confirmButton]}
+                                        onPress={revealPrivateKey}
+                                        disabled={revealingPrivateKey}
+                                    >
+                                        {revealingPrivateKey ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.confirmButtonText}>验证</Text>}
+                                    </TouchableOpacity>
+                                </View>
+                            </>
+                        ) : (
+                            <>
+                                <Text style={styles.revealedPrivateKey} selectable>{revealedPrivateKey}</Text>
+                                <View style={styles.modalButtons}>
+                                    <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => setPrivateKeyModalVisible(false)}>
+                                        <Text style={styles.cancelButtonText}>关闭</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={[styles.modalButton, styles.confirmButton]} onPress={copyRevealedPrivateKey}>
+                                        <Text style={styles.confirmButtonText}>复制私钥</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </>
+                        )}
                     </View>
                 </View>
             </Modal>
@@ -571,5 +689,26 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
         color: '#ffffff',
+    },
+    viewPrivateKeyButton: {
+        marginTop: 10,
+        paddingVertical: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+        backgroundColor: '#FFF4E5',
+    },
+    viewPrivateKeyText: {
+        color: '#A85B00',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    revealedPrivateKey: {
+        backgroundColor: '#FFF4E5',
+        borderRadius: 8,
+        padding: 10,
+        color: '#8B3A00',
+        fontSize: 12,
+        lineHeight: 18,
+        marginBottom: 16,
     },
 });
