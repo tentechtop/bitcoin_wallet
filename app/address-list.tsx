@@ -75,8 +75,13 @@ export default function AddressListScreen() {
     };
 
     const handleCopyAddress = async (address: string) => {
-        await Clipboard.setStringAsync(address);
-        Alert.alert('成功', '地址已复制');
+        try {
+            await Clipboard.setStringAsync(address);
+            Alert.alert('成功', '地址已复制');
+        } catch (error) {
+            console.error('复制地址失败:', error);
+            Alert.alert('错误', '复制地址失败');
+        }
     };
 
     const handleQueryBalance = async (address: string, index: number) => {

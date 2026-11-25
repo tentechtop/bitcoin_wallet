@@ -169,22 +169,37 @@ export default function CreateAddressScreen() {
 
     const handleCopyAddress = async () => {
         if (derivedAddress) {
-            await Clipboard.setStringAsync(derivedAddress);
-            Alert.alert('成功', '地址已复制');
+            try {
+                await Clipboard.setStringAsync(derivedAddress);
+                Alert.alert('成功', '地址已复制');
+            } catch (error) {
+                console.error('复制地址失败:', error);
+                Alert.alert('错误', '复制地址失败');
+            }
         }
     };
 
     const handleCopyPublicKey = async () => {
         if (derivedPublicKey) {
-            await Clipboard.setStringAsync(derivedPublicKey);
-            Alert.alert('成功', '公钥已复制');
+            try {
+                await Clipboard.setStringAsync(derivedPublicKey);
+                Alert.alert('成功', '公钥已复制');
+            } catch (error) {
+                console.error('复制公钥失败:', error);
+                Alert.alert('错误', '复制公钥失败');
+            }
         }
     };
 
     const handleCopyPrivateKey = async () => {
         if (derivedPrivateKey) {
-            await Clipboard.setStringAsync(derivedPrivateKey);
-            Alert.alert('警告', '私钥已复制，请妥善保管！');
+            try {
+                await Clipboard.setStringAsync(derivedPrivateKey);
+                Alert.alert('警告', '私钥已复制，请妥善保管！');
+            } catch (error) {
+                console.error('复制私钥失败:', error);
+                Alert.alert('错误', '复制私钥失败');
+            }
         }
     };
 

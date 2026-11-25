@@ -47,8 +47,13 @@ export default function BackupWalletScreen() {
 
   const copyMnemonic = async () => {
     if (!mnemonic) return;
-    await Clipboard.setStringAsync(mnemonic);
-    Alert.alert('已复制', '助记词已复制，请在使用后清理剪贴板');
+    try {
+      await Clipboard.setStringAsync(mnemonic);
+      Alert.alert('已复制', '助记词已复制，请在使用后清理剪贴板');
+    } catch (error) {
+      console.error('复制助记词失败:', error);
+      Alert.alert('复制失败', '无法写入剪贴板，请稍后重试');
+    }
   };
 
   return (
