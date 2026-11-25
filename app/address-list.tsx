@@ -23,6 +23,7 @@ export default function AddressListScreen() {
     const [deletePassword, setDeletePassword] = useState('');
     const [addressBalances, setAddressBalances] = useState<{ [key: number]: { balance: number; availableBalance: number; maturingBalance: number; utxoCount: number } }>({});
     const [loadingAddressIndex, setLoadingAddressIndex] = useState<number | null>(null);
+    const [deletingAddress, setDeletingAddress] = useState(false);
 
     useEffect(() => {
         if (walletId) {
@@ -110,10 +111,11 @@ export default function AddressListScreen() {
     };
 
     const confirmDeleteAddress = async () => {
-        if (!walletId || selectedAddressIndex === null) {
+        if (deletingAddress || !walletId || selectedAddressIndex === null) {
             return;
         }
 
+        setDeletingAddress(true);
         try {
             // 验证钱包密码
             const isPasswordValid = await multiWalletStorage.verifyWalletPassword(walletId, deletePassword);
@@ -145,6 +147,8 @@ export default function AddressListScreen() {
         } catch (error) {
             console.error('删除地址失败:', error);
             Alert.alert('错误', '删除地址失败');
+        } finally {
+            setDeletingAddress(false);
         }
     };
 
@@ -299,14 +303,16 @@ export default function AddressListScreen() {
                             <TouchableOpacity
                                 style={[styles.modalButton, styles.cancelButton]}
                                 onPress={() => setDeleteModalVisible(false)}
+                                disabled={deletingAddress}
                             >
                                 <Text style={styles.cancelButtonText}>取消</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.modalButton, styles.confirmButton]}
                                 onPress={confirmDeleteAddress}
+                                disabled={deletingAddress}
                             >
-                                <Text style={styles.confirmButtonText}>确认删除</Text>
+                                {deletingAddress ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.confirmButtonText}>确认删除</Text>}
                             </TouchableOpacity>
                         </View>
                     </View>
