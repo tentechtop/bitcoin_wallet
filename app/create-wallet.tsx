@@ -342,7 +342,7 @@ export default function CreateWalletScreen() {
                         </TouchableOpacity>
                     </View>
                     <View style={styles.mnemonicGrid}>
-                        {mnemonic.split(' ').map((word, index) => (
+                    {mnemonic.trim().split(/\s+/).map((word, index) => (
                             <View key={index} style={styles.mnemonicWordItem}>
                                 <Text style={styles.mnemonicWordIndex}>{(index + 1).toString().padStart(2, '0')}</Text>
                                 <Text style={styles.mnemonicWordText}>{word}</Text>

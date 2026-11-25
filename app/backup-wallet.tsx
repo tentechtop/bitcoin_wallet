@@ -97,7 +97,7 @@ export default function BackupWalletScreen() {
               </TouchableOpacity>
             </View>
             <View style={styles.wordsGrid}>
-              {mnemonic.split(' ').map((word, index) => (
+              {mnemonic.trim().split(/\s+/).map((word, index) => (
                 <View key={index} style={styles.wordItem}>
                   <ThemedText style={styles.wordIndex}>{String(index + 1).padStart(2, '0')}</ThemedText>
                   <ThemedText style={styles.wordText}>{revealed ? word : '••••••'}</ThemedText>
